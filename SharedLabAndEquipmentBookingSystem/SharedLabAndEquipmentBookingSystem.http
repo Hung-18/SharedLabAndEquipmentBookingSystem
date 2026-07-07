@@ -1,0 +1,6 @@
+@SharedLabAndEquipmentBookingSystem_HostAddress = http://localhost:5253
+
+GET {{SharedLabAndEquipmentBookingSystem_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
