@@ -36,6 +36,7 @@ namespace Domain.Interfaces
             DateTime? from = null,
             DateTime? to = null,
             CancellationToken cancellationToken = default);
+        
     }
 
 }
