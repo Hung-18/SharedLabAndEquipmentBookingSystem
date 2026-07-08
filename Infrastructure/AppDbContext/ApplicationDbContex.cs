@@ -1,6 +1,9 @@
-﻿using Domain;
+﻿using System;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Domain;
 using Domain.Entities;
-
 using Microsoft.EntityFrameworkCore;
 
 namespace Infrastructure.AppDbContext
@@ -51,11 +54,144 @@ namespace Infrastructure.AppDbContext
             SeedData(modelBuilder);
         }
 
+        // Call this once after Database.Migrate() in Program.cs.
+        // Reason: HasTrigger only tells EF Core that a table has a trigger.
+        // It does NOT create the SQL trigger in database.
+        public async Task EnsureDatabaseGuardsCreatedAsync(CancellationToken cancellationToken = default)
+        {
+            await Database.ExecuteSqlRawAsync(CreateOrAlterBookingItemsPreventConflictTriggerSql, cancellationToken);
+            await Database.ExecuteSqlRawAsync(CreateOrAlterBookingsPreventConflictTriggerSql, cancellationToken);
+            await Database.ExecuteSqlRawAsync(CreateOrAlterMaintenancesPreventConflictTriggerSql, cancellationToken);
+        }
+
+        // App-level guard before creating/updating a booking item.
+        // It checks both booking-vs-booking and booking-vs-maintenance.
+        public Task<bool> HasLabScheduleConflictAsync(
+            int labId,
+            DateTime startTime,
+            DateTime endTime,
+            int? excludedBookingId = null,
+            CancellationToken cancellationToken = default)
+        {
+            if (labId <= 0)
+                throw new ArgumentException("LabId must be greater than 0", nameof(labId));
+
+            return HasResourceScheduleConflictAsync(
+                labId: labId,
+                equipmentId: null,
+                startTime: startTime,
+                endTime: endTime,
+                excludedBookingId: excludedBookingId,
+                cancellationToken: cancellationToken);
+        }
+
+        // App-level guard before creating/updating a booking item.
+        // It checks both booking-vs-booking and booking-vs-maintenance.
+        public Task<bool> HasEquipmentScheduleConflictAsync(
+            int equipmentId,
+            DateTime startTime,
+            DateTime endTime,
+            int? excludedBookingId = null,
+            CancellationToken cancellationToken = default)
+        {
+            if (equipmentId <= 0)
+                throw new ArgumentException("EquipmentId must be greater than 0", nameof(equipmentId));
+
+            return HasResourceScheduleConflictAsync(
+                labId: null,
+                equipmentId: equipmentId,
+                startTime: startTime,
+                endTime: endTime,
+                excludedBookingId: excludedBookingId,
+                cancellationToken: cancellationToken);
+        }
+
+        private async Task<bool> HasResourceScheduleConflictAsync(
+            int? labId,
+            int? equipmentId,
+            DateTime startTime,
+            DateTime endTime,
+            int? excludedBookingId,
+            CancellationToken cancellationToken)
+        {
+            if (startTime >= endTime)
+                throw new ArgumentException("Start time must be earlier than end time");
+
+            if ((labId.HasValue && equipmentId.HasValue) || (!labId.HasValue && !equipmentId.HasValue))
+                throw new ArgumentException("Exactly one resource must be selected");
+
+            var activeBookingStatuses = new[]
+            {
+                BookingStatus.Pending,
+                BookingStatus.Approved
+            };
+
+            var activeMaintenanceStatuses = new[]
+            {
+                MaintenanceStatus.Scheduled,
+                MaintenanceStatus.InProgress
+            };
+
+            var bookingConflict = await BookingItems.AnyAsync(x =>
+                x.Booking != null &&
+                activeBookingStatuses.Contains(x.Booking.Status) &&
+                x.Booking.StartTime < endTime &&
+                x.Booking.EndTime > startTime &&
+                (!excludedBookingId.HasValue || x.BookingId != excludedBookingId.Value) &&
+                (
+                    (labId.HasValue && x.LabId == labId.Value) ||
+                    (equipmentId.HasValue && x.EquipmentId == equipmentId.Value)
+                ),
+                cancellationToken);
+
+            if (bookingConflict)
+                return true;
+
+            var maintenanceConflict = await Maintenances.AnyAsync(x =>
+                activeMaintenanceStatuses.Contains(x.Status) &&
+                x.StartTime < endTime &&
+                x.EndTime > startTime &&
+                (
+                    (labId.HasValue && x.LabId == labId.Value) ||
+                    (equipmentId.HasValue && x.EquipmentId == equipmentId.Value)
+                ),
+                cancellationToken);
+
+            return maintenanceConflict;
+        }
+
+        private static string EnumCheck<TEnum>(string columnName)
+            where TEnum : struct, Enum
+        {
+            var values = string.Join(", ", Enum.GetNames<TEnum>().Select(x => $"'{x}'"));
+            return $"[{columnName}] IN ({values})";
+        }
+
+        // Accept both 'LabRoom' and 'Lab' to avoid mismatch if your ResourceType enum is named Lab instead of LabRoom.
+        private const string BookingItemResourceCheck = @"
+(
+    ([ResourceType] IN ('LabRoom', 'Lab') AND [LabId] IS NOT NULL AND [EquipmentId] IS NULL)
+    OR
+    ([ResourceType] = 'Equipment' AND [LabId] IS NULL AND [EquipmentId] IS NOT NULL)
+)";
+
+        private const string SingleResourceCheck = @"
+(
+    ([LabId] IS NOT NULL AND [EquipmentId] IS NULL)
+    OR
+    ([LabId] IS NULL AND [EquipmentId] IS NOT NULL)
+)";
+
         private static void ConfigureRole(ModelBuilder modelBuilder)
         {
             modelBuilder.Entity<Role>(entity =>
             {
-                entity.ToTable("Roles");
+                entity.ToTable("Roles", table =>
+                {
+                    table.HasCheckConstraint(
+                        "CK_Roles_RoleName",
+                        EnumCheck<RoleName>(nameof(Role.RoleName)));
+                });
 
                 entity.HasKey(x => x.RoleId);
 
@@ -76,7 +212,12 @@ namespace Infrastructure.AppDbContext
         {
             modelBuilder.Entity<Department>(entity =>
             {
-                entity.ToTable("Departments");
+                entity.ToTable("Departments", table =>
+                {
+                    table.HasCheckConstraint(
+                        "CK_Departments_Status",
+                        EnumCheck<DepartmentStatus>(nameof(Department.Status)));
+                });
 
                 entity.HasKey(x => x.DepartmentId);
 
@@ -101,7 +242,16 @@ namespace Infrastructure.AppDbContext
         {
             modelBuilder.Entity<User>(entity =>
             {
-                entity.ToTable("Users");
+                entity.ToTable("Users", table =>
+                {
+                    table.HasCheckConstraint(
+                        "CK_Users_Status",
+                        EnumCheck<UserStatus>(nameof(User.Status)));
+
+                    table.HasCheckConstraint(
+                        "CK_Users_PenaltyPoints",
+                        "[PenaltyPoints] >= 0");
+                });
 
                 entity.HasKey(x => x.UserId);
 
@@ -151,7 +301,16 @@ namespace Infrastructure.AppDbContext
         {
             modelBuilder.Entity<LabRoom>(entity =>
             {
-                entity.ToTable("LabRooms");
+                entity.ToTable("LabRooms", table =>
+                {
+                    table.HasCheckConstraint(
+                        "CK_LabRooms_Status",
+                        EnumCheck<LabRoomStatus>(nameof(LabRoom.Status)));
+
+                    table.HasCheckConstraint(
+                        "CK_LabRooms_Capacity",
+                        "[Capacity] > 0");
+                });
 
                 entity.HasKey(x => x.LabId);
 
@@ -195,7 +354,12 @@ namespace Infrastructure.AppDbContext
         {
             modelBuilder.Entity<Equipment>(entity =>
             {
-                entity.ToTable("Equipments");
+                entity.ToTable("Equipments", table =>
+                {
+                    table.HasCheckConstraint(
+                        "CK_Equipments_Status",
+                        EnumCheck<EquipmentStatus>(nameof(Equipment.Status)));
+                });
 
                 entity.HasKey(x => x.EquipmentId);
 
@@ -228,7 +392,20 @@ namespace Infrastructure.AppDbContext
         {
             modelBuilder.Entity<PriorityRule>(entity =>
             {
-                entity.ToTable("PriorityRules");
+                entity.ToTable("PriorityRules", table =>
+                {
+                    table.HasCheckConstraint(
+                        "CK_PriorityRules_PurposeType",
+                        EnumCheck<BookingPurposeType>(nameof(PriorityRule.PurposeType)));
+
+                    table.HasCheckConstraint(
+                        "CK_PriorityRules_Status",
+                        EnumCheck<PriorityRuleStatus>(nameof(PriorityRule.Status)));
+
+                    table.HasCheckConstraint(
+                        "CK_PriorityRules_PriorityLevel",
+                        "[PriorityLevel] > 0");
+                });
 
                 entity.HasKey(x => x.PriorityRuleId);
 
@@ -257,7 +434,22 @@ namespace Infrastructure.AppDbContext
         {
             modelBuilder.Entity<Booking>(entity =>
             {
-                entity.ToTable("Bookings");
+                entity.ToTable("Bookings", table =>
+                {
+                    table.HasCheckConstraint(
+                        "CK_Bookings_PurposeType",
+                        EnumCheck<BookingPurposeType>(nameof(Booking.PurposeType)));
+
+                    table.HasCheckConstraint(
+                        "CK_Bookings_Status",
+                        EnumCheck<BookingStatus>(nameof(Booking.Status)));
+
+                    table.HasCheckConstraint(
+                        "CK_Bookings_StartTime_EndTime",
+                        "[StartTime] < [EndTime]");
+
+                    table.HasTrigger("TRG_Bookings_PreventConflict");
+                });
 
                 entity.HasKey(x => x.BookingId);
 
@@ -287,8 +479,8 @@ namespace Infrastructure.AppDbContext
                 entity.Property(x => x.CreatedAt)
                     .IsRequired();
 
+                entity.HasIndex(x => new { x.StartTime, x.EndTime });
                 entity.HasIndex(x => new { x.UserId, x.StartTime, x.EndTime });
-
                 entity.HasIndex(x => x.Status);
 
                 entity.HasOne(x => x.User)
@@ -312,7 +504,18 @@ namespace Infrastructure.AppDbContext
         {
             modelBuilder.Entity<BookingItem>(entity =>
             {
-                entity.ToTable("BookingItems");
+                entity.ToTable("BookingItems", table =>
+                {
+                    table.HasCheckConstraint(
+                        "CK_BookingItems_ResourceType",
+                        EnumCheck<ResourceType>(nameof(BookingItem.ResourceType)));
+
+                    table.HasCheckConstraint(
+                        "CK_BookingItems_OneResourceOnly",
+                        BookingItemResourceCheck);
+
+                    table.HasTrigger("TRG_BookingItems_PreventConflict");
+                });
 
                 entity.HasKey(x => x.BookingItemId);
 
@@ -324,7 +527,9 @@ namespace Infrastructure.AppDbContext
                 entity.Property(x => x.Note)
                     .HasMaxLength(500);
 
-                entity.HasIndex(x => new { x.LabId, x.EquipmentId });
+                entity.HasIndex(x => x.BookingId);
+                entity.HasIndex(x => x.LabId);
+                entity.HasIndex(x => x.EquipmentId);
 
                 entity.HasOne(x => x.Booking)
                     .WithMany(x => x.BookingItems)
@@ -347,7 +552,16 @@ namespace Infrastructure.AppDbContext
         {
             modelBuilder.Entity<UsageLog>(entity =>
             {
-                entity.ToTable("UsageLogs");
+                entity.ToTable("UsageLogs", table =>
+                {
+                    table.HasCheckConstraint(
+                        "CK_UsageLogs_IncidentStatus",
+                        EnumCheck<UsageIncidentStatus>(nameof(UsageLog.IncidentStatus)));
+
+                    table.HasCheckConstraint(
+                        "CK_UsageLogs_Checkin_Checkout",
+                        "[ActualCheckout] IS NULL OR [ActualCheckin] <= [ActualCheckout]");
+                });
 
                 entity.HasKey(x => x.LogId);
 
@@ -373,7 +587,26 @@ namespace Infrastructure.AppDbContext
         {
             modelBuilder.Entity<Maintenance>(entity =>
             {
-                entity.ToTable("Maintenances");
+                entity.ToTable("Maintenances", table =>
+                {
+                    table.HasCheckConstraint(
+                        "CK_Maintenances_Status",
+                        EnumCheck<MaintenanceStatus>(nameof(Maintenance.Status)));
+
+                    table.HasCheckConstraint(
+                        "CK_Maintenances_OneResourceOnly",
+                        SingleResourceCheck);
+
+                    table.HasCheckConstraint(
+                        "CK_Maintenances_StartTime_EndTime",
+                        "[StartTime] < [EndTime]");
+
+                    table.HasCheckConstraint(
+                        "CK_Maintenances_MaintenanceCost",
+                        "[MaintenanceCost] >= 0");
+
+                    table.HasTrigger("TRG_Maintenances_PreventConflict");
+                });
 
                 entity.HasKey(x => x.MaintenanceId);
 
@@ -395,7 +628,6 @@ namespace Infrastructure.AppDbContext
                     .IsRequired();
 
                 entity.HasIndex(x => new { x.LabId, x.StartTime, x.EndTime });
-
                 entity.HasIndex(x => new { x.EquipmentId, x.StartTime, x.EndTime });
 
                 entity.HasOne(x => x.LabRoom)
@@ -419,7 +651,24 @@ namespace Infrastructure.AppDbContext
         {
             modelBuilder.Entity<Waitlist>(entity =>
             {
-                entity.ToTable("Waitlists");
+                entity.ToTable("Waitlists", table =>
+                {
+                    table.HasCheckConstraint(
+                        "CK_Waitlists_Status",
+                        EnumCheck<WaitlistStatus>(nameof(Waitlist.Status)));
+
+                    table.HasCheckConstraint(
+                        "CK_Waitlists_OneResourceOnly",
+                        SingleResourceCheck);
+
+                    table.HasCheckConstraint(
+                        "CK_Waitlists_RequestedStart_RequestedEnd",
+                        "[RequestedStart] < [RequestedEnd]");
+
+                    table.HasCheckConstraint(
+                        "CK_Waitlists_QueuePosition",
+                        "[QueuePosition] > 0");
+                });
 
                 entity.HasKey(x => x.WaitlistId);
 
@@ -438,7 +687,6 @@ namespace Infrastructure.AppDbContext
                     .IsRequired();
 
                 entity.HasIndex(x => new { x.LabId, x.RequestedStart, x.RequestedEnd });
-
                 entity.HasIndex(x => new { x.EquipmentId, x.RequestedStart, x.RequestedEnd });
 
                 entity.HasOne(x => x.User)
@@ -462,7 +710,20 @@ namespace Infrastructure.AppDbContext
         {
             modelBuilder.Entity<Violation>(entity =>
             {
-                entity.ToTable("Violations");
+                entity.ToTable("Violations", table =>
+                {
+                    table.HasCheckConstraint(
+                        "CK_Violations_ViolationType",
+                        EnumCheck<ViolationType>(nameof(Violation.ViolationType)));
+
+                    table.HasCheckConstraint(
+                        "CK_Violations_Status",
+                        EnumCheck<ViolationStatus>(nameof(Violation.Status)));
+
+                    table.HasCheckConstraint(
+                        "CK_Violations_PenaltyPointsAdded",
+                        "[PenaltyPointsAdded] > 0");
+                });
 
                 entity.HasKey(x => x.ViolationId);
 
@@ -498,7 +759,12 @@ namespace Infrastructure.AppDbContext
         {
             modelBuilder.Entity<AuditLog>(entity =>
             {
-                entity.ToTable("AuditLogs");
+                entity.ToTable("AuditLogs", table =>
+                {
+                    table.HasCheckConstraint(
+                        "CK_AuditLogs_ActionType",
+                        EnumCheck<AuditActionType>(nameof(AuditLog.ActionType)));
+                });
 
                 entity.HasKey(x => x.AuditLogId);
 
@@ -534,7 +800,16 @@ namespace Infrastructure.AppDbContext
         {
             modelBuilder.Entity<RefreshToken>(entity =>
             {
-                entity.ToTable("RefreshTokens");
+                entity.ToTable("RefreshTokens", table =>
+                {
+                    table.HasCheckConstraint(
+                        "CK_RefreshTokens_Status",
+                        EnumCheck<RefreshTokenStatus>(nameof(RefreshToken.Status)));
+
+                    table.HasCheckConstraint(
+                        "CK_RefreshTokens_ExpiresAt_CreatedAt",
+                        "[ExpiresAt] > [CreatedAt]");
+                });
 
                 entity.HasKey(x => x.RefreshTokenId);
 
@@ -567,7 +842,12 @@ namespace Infrastructure.AppDbContext
         {
             modelBuilder.Entity<Notification>(entity =>
             {
-                entity.ToTable("Notifications");
+                entity.ToTable("Notifications", table =>
+                {
+                    table.HasCheckConstraint(
+                        "CK_Notifications_NotificationType",
+                        EnumCheck<NotificationType>(nameof(Notification.NotificationType)));
+                });
 
                 entity.HasKey(x => x.NotificationId);
 
@@ -686,5 +966,168 @@ namespace Infrastructure.AppDbContext
                 }
             );
         }
+
+        private const string CreateOrAlterBookingItemsPreventConflictTriggerSql = """
+CREATE OR ALTER TRIGGER [TRG_BookingItems_PreventConflict]
+ON [BookingItems]
+AFTER INSERT, UPDATE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF EXISTS
+    (
+        SELECT 1
+        FROM inserted i
+        INNER JOIN [Bookings] b ON b.[BookingId] = i.[BookingId]
+        INNER JOIN [BookingItems] otherItem
+            ON otherItem.[BookingItemId] <> i.[BookingItemId]
+        INNER JOIN [Bookings] otherBooking
+            ON otherBooking.[BookingId] = otherItem.[BookingId]
+        WHERE b.[Status] IN ('Pending', 'Approved')
+          AND otherBooking.[Status] IN ('Pending', 'Approved')
+          AND b.[StartTime] < otherBooking.[EndTime]
+          AND b.[EndTime] > otherBooking.[StartTime]
+          AND
+          (
+              (i.[LabId] IS NOT NULL AND otherItem.[LabId] = i.[LabId])
+              OR
+              (i.[EquipmentId] IS NOT NULL AND otherItem.[EquipmentId] = i.[EquipmentId])
+          )
+    )
+    BEGIN
+        THROW 50001, 'Booking schedule overlaps with an existing booking.', 1;
+    END;
+
+    IF EXISTS
+    (
+        SELECT 1
+        FROM inserted i
+        INNER JOIN [Bookings] b ON b.[BookingId] = i.[BookingId]
+        INNER JOIN [Maintenances] m ON
+        (
+            (i.[LabId] IS NOT NULL AND m.[LabId] = i.[LabId])
+            OR
+            (i.[EquipmentId] IS NOT NULL AND m.[EquipmentId] = i.[EquipmentId])
+        )
+        WHERE b.[Status] IN ('Pending', 'Approved')
+          AND m.[Status] IN ('Scheduled', 'InProgress')
+          AND b.[StartTime] < m.[EndTime]
+          AND b.[EndTime] > m.[StartTime]
+    )
+    BEGIN
+        THROW 50002, 'Booking schedule overlaps with maintenance time.', 1;
+    END;
+END
+""";
+
+        private const string CreateOrAlterBookingsPreventConflictTriggerSql = """
+CREATE OR ALTER TRIGGER [TRG_Bookings_PreventConflict]
+ON [Bookings]
+AFTER INSERT, UPDATE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF EXISTS
+    (
+        SELECT 1
+        FROM inserted b
+        INNER JOIN [BookingItems] item
+            ON item.[BookingId] = b.[BookingId]
+        INNER JOIN [BookingItems] otherItem
+            ON otherItem.[BookingItemId] <> item.[BookingItemId]
+        INNER JOIN [Bookings] otherBooking
+            ON otherBooking.[BookingId] = otherItem.[BookingId]
+        WHERE b.[Status] IN ('Pending', 'Approved')
+          AND otherBooking.[Status] IN ('Pending', 'Approved')
+          AND otherBooking.[BookingId] <> b.[BookingId]
+          AND b.[StartTime] < otherBooking.[EndTime]
+          AND b.[EndTime] > otherBooking.[StartTime]
+          AND
+          (
+              (item.[LabId] IS NOT NULL AND otherItem.[LabId] = item.[LabId])
+              OR
+              (item.[EquipmentId] IS NOT NULL AND otherItem.[EquipmentId] = item.[EquipmentId])
+          )
+    )
+    BEGIN
+        THROW 50003, 'Booking schedule overlaps with an existing booking.', 1;
+    END;
+
+    IF EXISTS
+    (
+        SELECT 1
+        FROM inserted b
+        INNER JOIN [BookingItems] item
+            ON item.[BookingId] = b.[BookingId]
+        INNER JOIN [Maintenances] m ON
+        (
+            (item.[LabId] IS NOT NULL AND m.[LabId] = item.[LabId])
+            OR
+            (item.[EquipmentId] IS NOT NULL AND m.[EquipmentId] = item.[EquipmentId])
+        )
+        WHERE b.[Status] IN ('Pending', 'Approved')
+          AND m.[Status] IN ('Scheduled', 'InProgress')
+          AND b.[StartTime] < m.[EndTime]
+          AND b.[EndTime] > m.[StartTime]
+    )
+    BEGIN
+        THROW 50004, 'Booking schedule overlaps with maintenance time.', 1;
+    END;
+END
+""";
+
+        private const string CreateOrAlterMaintenancesPreventConflictTriggerSql = """
+CREATE OR ALTER TRIGGER [TRG_Maintenances_PreventConflict]
+ON [Maintenances]
+AFTER INSERT, UPDATE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF EXISTS
+    (
+        SELECT 1
+        FROM inserted m
+        INNER JOIN [BookingItems] item ON
+        (
+            (m.[LabId] IS NOT NULL AND item.[LabId] = m.[LabId])
+            OR
+            (m.[EquipmentId] IS NOT NULL AND item.[EquipmentId] = m.[EquipmentId])
+        )
+        INNER JOIN [Bookings] b
+            ON b.[BookingId] = item.[BookingId]
+        WHERE m.[Status] IN ('Scheduled', 'InProgress')
+          AND b.[Status] IN ('Pending', 'Approved')
+          AND m.[StartTime] < b.[EndTime]
+          AND m.[EndTime] > b.[StartTime]
+    )
+    BEGIN
+        THROW 50005, 'Maintenance schedule overlaps with an existing booking.', 1;
+    END;
+
+    IF EXISTS
+    (
+        SELECT 1
+        FROM inserted m
+        INNER JOIN [Maintenances] otherMaintenance ON
+            otherMaintenance.[MaintenanceId] <> m.[MaintenanceId]
+            AND
+            (
+                (m.[LabId] IS NOT NULL AND otherMaintenance.[LabId] = m.[LabId])
+                OR
+                (m.[EquipmentId] IS NOT NULL AND otherMaintenance.[EquipmentId] = m.[EquipmentId])
+            )
+        WHERE m.[Status] IN ('Scheduled', 'InProgress')
+          AND otherMaintenance.[Status] IN ('Scheduled', 'InProgress')
+          AND m.[StartTime] < otherMaintenance.[EndTime]
+          AND m.[EndTime] > otherMaintenance.[StartTime]
+    )
+    BEGIN
+        THROW 50006, 'Maintenance schedule overlaps with an existing maintenance schedule.', 1;
+    END;
+END
+""";
     }
 }

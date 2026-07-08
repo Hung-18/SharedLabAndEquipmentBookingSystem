@@ -17,7 +17,20 @@ if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
 }
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
+    Console.WriteLine("Dang ket noi database: " + db.Database.GetConnectionString());
+
+    Console.WriteLine("Dang chay migration...");
+    await db.Database.MigrateAsync();
+
+    Console.WriteLine("Dang tao trigger...");
+    await db.EnsureDatabaseGuardsCreatedAsync();
+
+    Console.WriteLine("Da tao trigger xong.");
+}
 app.UseHttpsRedirection();
 
 app.UseAuthorization();
@@ -25,3 +38,4 @@ app.UseAuthorization();
 app.MapControllers();
 
 app.Run();
+

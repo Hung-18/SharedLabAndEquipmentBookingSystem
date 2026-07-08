@@ -12,7 +12,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20260707085356_InitDb")]
+    [Migration("20260707095739_InitDb")]
     partial class InitDb
     {
         /// <inheritdoc />
@@ -66,7 +66,10 @@ namespace Infrastructure.Migrations
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("AuditLogs", (string)null);
+                    b.ToTable("AuditLogs", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AuditLogs_ActionType", "[ActionType] IN ('Create', 'Update', 'Delete', 'Login', 'Logout', 'ApproveBooking', 'RejectBooking', 'CheckIn', 'CheckOut')");
+                        });
                 });
 
             modelBuilder.Entity("Domain.Entities.Booking", b =>
@@ -123,9 +126,22 @@ namespace Infrastructure.Migrations
 
                     b.HasIndex("Status");
 
+                    b.HasIndex("StartTime", "EndTime");
+
                     b.HasIndex("UserId", "StartTime", "EndTime");
 
-                    b.ToTable("Bookings", (string)null);
+                    b.ToTable("Bookings", null, t =>
+                        {
+                            t.HasTrigger("TRG_Bookings_PreventConflict");
+
+                            t.HasCheckConstraint("CK_Bookings_PurposeType", "[PurposeType] IN ('ResearchProject', 'CoursePractice', 'SelfStudy', 'Other')");
+
+                            t.HasCheckConstraint("CK_Bookings_StartTime_EndTime", "[StartTime] < [EndTime]");
+
+                            t.HasCheckConstraint("CK_Bookings_Status", "[Status] IN ('Pending', 'Approved', 'Rejected', 'Cancelled', 'Completed', 'NoShow')");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
             modelBuilder.Entity("Domain.Entities.BookingItem", b =>
@@ -160,9 +176,18 @@ namespace Infrastructure.Migrations
 
                     b.HasIndex("EquipmentId");
 
-                    b.HasIndex("LabId", "EquipmentId");
+                    b.HasIndex("LabId");
 
-                    b.ToTable("BookingItems", (string)null);
+                    b.ToTable("BookingItems", null, t =>
+                        {
+                            t.HasTrigger("TRG_BookingItems_PreventConflict");
+
+                            t.HasCheckConstraint("CK_BookingItems_OneResourceOnly", "\r\n(\r\n    ([ResourceType] IN ('LabRoom', 'Lab') AND [LabId] IS NOT NULL AND [EquipmentId] IS NULL)\r\n    OR\r\n    ([ResourceType] = 'Equipment' AND [LabId] IS NULL AND [EquipmentId] IS NOT NULL)\r\n)");
+
+                            t.HasCheckConstraint("CK_BookingItems_ResourceType", "[ResourceType] IN ('LabRoom', 'Equipment')");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
             modelBuilder.Entity("Domain.Entities.Department", b =>
@@ -192,7 +217,10 @@ namespace Infrastructure.Migrations
                     b.HasIndex("DepartmentName")
                         .IsUnique();
 
-                    b.ToTable("Departments", (string)null);
+                    b.ToTable("Departments", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_Departments_Status", "[Status] IN ('Active', 'Inactive')");
+                        });
 
                     b.HasData(
                         new
@@ -260,7 +288,10 @@ namespace Infrastructure.Migrations
 
                     b.HasIndex("LabId");
 
-                    b.ToTable("Equipments", (string)null);
+                    b.ToTable("Equipments", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_Equipments_Status", "[Status] IN ('Available', 'InUse', 'Maintenance', 'Broken', 'Retired')");
+                        });
                 });
 
             modelBuilder.Entity("Domain.Entities.LabRoom", b =>
@@ -311,7 +342,12 @@ namespace Infrastructure.Migrations
                     b.HasIndex("RoomCode")
                         .IsUnique();
 
-                    b.ToTable("LabRooms", (string)null);
+                    b.ToTable("LabRooms", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_LabRooms_Capacity", "[Capacity] > 0");
+
+                            t.HasCheckConstraint("CK_LabRooms_Status", "[Status] IN ('Available', 'Unavailable', 'Maintenance', 'Inactive')");
+                        });
                 });
 
             modelBuilder.Entity("Domain.Entities.Maintenance", b =>
@@ -357,7 +393,20 @@ namespace Infrastructure.Migrations
 
                     b.HasIndex("LabId", "StartTime", "EndTime");
 
-                    b.ToTable("Maintenances", (string)null);
+                    b.ToTable("Maintenances", null, t =>
+                        {
+                            t.HasTrigger("TRG_Maintenances_PreventConflict");
+
+                            t.HasCheckConstraint("CK_Maintenances_MaintenanceCost", "[MaintenanceCost] >= 0");
+
+                            t.HasCheckConstraint("CK_Maintenances_OneResourceOnly", "\r\n(\r\n    ([LabId] IS NOT NULL AND [EquipmentId] IS NULL)\r\n    OR\r\n    ([LabId] IS NULL AND [EquipmentId] IS NOT NULL)\r\n)");
+
+                            t.HasCheckConstraint("CK_Maintenances_StartTime_EndTime", "[StartTime] < [EndTime]");
+
+                            t.HasCheckConstraint("CK_Maintenances_Status", "[Status] IN ('Scheduled', 'InProgress', 'Completed', 'Cancelled')");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
             modelBuilder.Entity("Domain.Entities.Notification", b =>
@@ -395,7 +444,10 @@ namespace Infrastructure.Migrations
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("Notifications", (string)null);
+                    b.ToTable("Notifications", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_Notifications_NotificationType", "[NotificationType] IN ('BookingApproved', 'BookingRejected', 'BookingReminder', 'WaitlistAvailable', 'Maintenance', 'Violation', 'System')");
+                        });
                 });
 
             modelBuilder.Entity("Domain.Entities.PriorityRule", b =>
@@ -428,7 +480,14 @@ namespace Infrastructure.Migrations
                     b.HasIndex("PurposeType")
                         .IsUnique();
 
-                    b.ToTable("PriorityRules", (string)null);
+                    b.ToTable("PriorityRules", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_PriorityRules_PriorityLevel", "[PriorityLevel] > 0");
+
+                            t.HasCheckConstraint("CK_PriorityRules_PurposeType", "[PurposeType] IN ('ResearchProject', 'CoursePractice', 'SelfStudy', 'Other')");
+
+                            t.HasCheckConstraint("CK_PriorityRules_Status", "[Status] IN ('Active', 'Inactive')");
+                        });
 
                     b.HasData(
                         new
@@ -502,7 +561,12 @@ namespace Infrastructure.Migrations
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("RefreshTokens", (string)null);
+                    b.ToTable("RefreshTokens", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_RefreshTokens_ExpiresAt_CreatedAt", "[ExpiresAt] > [CreatedAt]");
+
+                            t.HasCheckConstraint("CK_RefreshTokens_Status", "[Status] IN ('Active', 'Revoked', 'Expired')");
+                        });
                 });
 
             modelBuilder.Entity("Domain.Entities.Role", b =>
@@ -527,7 +591,10 @@ namespace Infrastructure.Migrations
                     b.HasIndex("RoleName")
                         .IsUnique();
 
-                    b.ToTable("Roles", (string)null);
+                    b.ToTable("Roles", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_Roles_RoleName", "[RoleName] IN ('Admin', 'LabManager', 'Requester')");
+                        });
 
                     b.HasData(
                         new
@@ -579,7 +646,12 @@ namespace Infrastructure.Migrations
 
                     b.HasIndex("BookingItemId");
 
-                    b.ToTable("UsageLogs", (string)null);
+                    b.ToTable("UsageLogs", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_UsageLogs_Checkin_Checkout", "[ActualCheckout] IS NULL OR [ActualCheckin] <= [ActualCheckout]");
+
+                            t.HasCheckConstraint("CK_UsageLogs_IncidentStatus", "[IncidentStatus] IN ('None', 'DamageReported', 'LateCheckout', 'MissingEquipment', 'Other')");
+                        });
                 });
 
             modelBuilder.Entity("Domain.Entities.User", b =>
@@ -639,7 +711,12 @@ namespace Infrastructure.Migrations
                     b.HasIndex("Username")
                         .IsUnique();
 
-                    b.ToTable("Users", (string)null);
+                    b.ToTable("Users", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_Users_PenaltyPoints", "[PenaltyPoints] >= 0");
+
+                            t.HasCheckConstraint("CK_Users_Status", "[Status] IN ('Active', 'Inactive', 'Restricted', 'Locked')");
+                        });
                 });
 
             modelBuilder.Entity("Domain.Entities.Violation", b =>
@@ -678,7 +755,14 @@ namespace Infrastructure.Migrations
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("Violations", (string)null);
+                    b.ToTable("Violations", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_Violations_PenaltyPointsAdded", "[PenaltyPointsAdded] > 0");
+
+                            t.HasCheckConstraint("CK_Violations_Status", "[Status] IN ('Active', 'Resolved', 'Cancelled')");
+
+                            t.HasCheckConstraint("CK_Violations_ViolationType", "[ViolationType] IN ('NoShow', 'LateCheckout', 'DamageEquipment', 'MisuseEquipment', 'UnauthorizedUse')");
+                        });
                 });
 
             modelBuilder.Entity("Domain.Entities.Waitlist", b =>
@@ -723,7 +807,16 @@ namespace Infrastructure.Migrations
 
                     b.HasIndex("LabId", "RequestedStart", "RequestedEnd");
 
-                    b.ToTable("Waitlists", (string)null);
+                    b.ToTable("Waitlists", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_Waitlists_OneResourceOnly", "\r\n(\r\n    ([LabId] IS NOT NULL AND [EquipmentId] IS NULL)\r\n    OR\r\n    ([LabId] IS NULL AND [EquipmentId] IS NOT NULL)\r\n)");
+
+                            t.HasCheckConstraint("CK_Waitlists_QueuePosition", "[QueuePosition] > 0");
+
+                            t.HasCheckConstraint("CK_Waitlists_RequestedStart_RequestedEnd", "[RequestedStart] < [RequestedEnd]");
+
+                            t.HasCheckConstraint("CK_Waitlists_Status", "[Status] IN ('Waiting', 'Notified', 'Booked', 'Cancelled', 'Expired')");
+                        });
                 });
 
             modelBuilder.Entity("Domain.Entities.AuditLog", b =>

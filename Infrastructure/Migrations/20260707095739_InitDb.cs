@@ -26,6 +26,7 @@ namespace Infrastructure.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_Departments", x => x.DepartmentId);
+                    table.CheckConstraint("CK_Departments_Status", "[Status] IN ('Active', 'Inactive')");
                 });
 
             migrationBuilder.CreateTable(
@@ -42,6 +43,9 @@ namespace Infrastructure.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_PriorityRules", x => x.PriorityRuleId);
+                    table.CheckConstraint("CK_PriorityRules_PriorityLevel", "[PriorityLevel] > 0");
+                    table.CheckConstraint("CK_PriorityRules_PurposeType", "[PurposeType] IN ('ResearchProject', 'CoursePractice', 'SelfStudy', 'Other')");
+                    table.CheckConstraint("CK_PriorityRules_Status", "[Status] IN ('Active', 'Inactive')");
                 });
 
             migrationBuilder.CreateTable(
@@ -56,6 +60,7 @@ namespace Infrastructure.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_Roles", x => x.RoleId);
+                    table.CheckConstraint("CK_Roles_RoleName", "[RoleName] IN ('Admin', 'LabManager', 'Requester')");
                 });
 
             migrationBuilder.CreateTable(
@@ -77,6 +82,8 @@ namespace Infrastructure.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_Users", x => x.UserId);
+                    table.CheckConstraint("CK_Users_PenaltyPoints", "[PenaltyPoints] >= 0");
+                    table.CheckConstraint("CK_Users_Status", "[Status] IN ('Active', 'Inactive', 'Restricted', 'Locked')");
                     table.ForeignKey(
                         name: "FK_Users_Departments_DepartmentId",
                         column: x => x.DepartmentId,
@@ -109,6 +116,7 @@ namespace Infrastructure.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_AuditLogs", x => x.AuditLogId);
+                    table.CheckConstraint("CK_AuditLogs_ActionType", "[ActionType] IN ('Create', 'Update', 'Delete', 'Login', 'Logout', 'ApproveBooking', 'RejectBooking', 'CheckIn', 'CheckOut')");
                     table.ForeignKey(
                         name: "FK_AuditLogs_Users_UserId",
                         column: x => x.UserId,
@@ -138,6 +146,9 @@ namespace Infrastructure.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_Bookings", x => x.BookingId);
+                    table.CheckConstraint("CK_Bookings_PurposeType", "[PurposeType] IN ('ResearchProject', 'CoursePractice', 'SelfStudy', 'Other')");
+                    table.CheckConstraint("CK_Bookings_StartTime_EndTime", "[StartTime] < [EndTime]");
+                    table.CheckConstraint("CK_Bookings_Status", "[Status] IN ('Pending', 'Approved', 'Rejected', 'Cancelled', 'Completed', 'NoShow')");
                     table.ForeignKey(
                         name: "FK_Bookings_PriorityRules_PriorityRuleId",
                         column: x => x.PriorityRuleId,
@@ -176,6 +187,8 @@ namespace Infrastructure.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_LabRooms", x => x.LabId);
+                    table.CheckConstraint("CK_LabRooms_Capacity", "[Capacity] > 0");
+                    table.CheckConstraint("CK_LabRooms_Status", "[Status] IN ('Available', 'Unavailable', 'Maintenance', 'Inactive')");
                     table.ForeignKey(
                         name: "FK_LabRooms_Users_ManagerId",
                         column: x => x.ManagerId,
@@ -200,6 +213,7 @@ namespace Infrastructure.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_Notifications", x => x.NotificationId);
+                    table.CheckConstraint("CK_Notifications_NotificationType", "[NotificationType] IN ('BookingApproved', 'BookingRejected', 'BookingReminder', 'WaitlistAvailable', 'Maintenance', 'Violation', 'System')");
                     table.ForeignKey(
                         name: "FK_Notifications_Users_UserId",
                         column: x => x.UserId,
@@ -224,6 +238,8 @@ namespace Infrastructure.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_RefreshTokens", x => x.RefreshTokenId);
+                    table.CheckConstraint("CK_RefreshTokens_ExpiresAt_CreatedAt", "[ExpiresAt] > [CreatedAt]");
+                    table.CheckConstraint("CK_RefreshTokens_Status", "[Status] IN ('Active', 'Revoked', 'Expired')");
                     table.ForeignKey(
                         name: "FK_RefreshTokens_Users_UserId",
                         column: x => x.UserId,
@@ -248,6 +264,9 @@ namespace Infrastructure.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_Violations", x => x.ViolationId);
+                    table.CheckConstraint("CK_Violations_PenaltyPointsAdded", "[PenaltyPointsAdded] > 0");
+                    table.CheckConstraint("CK_Violations_Status", "[Status] IN ('Active', 'Resolved', 'Cancelled')");
+                    table.CheckConstraint("CK_Violations_ViolationType", "[ViolationType] IN ('NoShow', 'LateCheckout', 'DamageEquipment', 'MisuseEquipment', 'UnauthorizedUse')");
                     table.ForeignKey(
                         name: "FK_Violations_Bookings_BookingId",
                         column: x => x.BookingId,
@@ -278,6 +297,7 @@ namespace Infrastructure.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_Equipments", x => x.EquipmentId);
+                    table.CheckConstraint("CK_Equipments_Status", "[Status] IN ('Available', 'InUse', 'Maintenance', 'Broken', 'Retired')");
                     table.ForeignKey(
                         name: "FK_Equipments_LabRooms_LabId",
                         column: x => x.LabId,
@@ -301,6 +321,8 @@ namespace Infrastructure.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_BookingItems", x => x.BookingItemId);
+                    table.CheckConstraint("CK_BookingItems_OneResourceOnly", "\r\n(\r\n    ([ResourceType] IN ('LabRoom', 'Lab') AND [LabId] IS NOT NULL AND [EquipmentId] IS NULL)\r\n    OR\r\n    ([ResourceType] = 'Equipment' AND [LabId] IS NULL AND [EquipmentId] IS NOT NULL)\r\n)");
+                    table.CheckConstraint("CK_BookingItems_ResourceType", "[ResourceType] IN ('LabRoom', 'Equipment')");
                     table.ForeignKey(
                         name: "FK_BookingItems_Bookings_BookingId",
                         column: x => x.BookingId,
@@ -339,6 +361,10 @@ namespace Infrastructure.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_Maintenances", x => x.MaintenanceId);
+                    table.CheckConstraint("CK_Maintenances_MaintenanceCost", "[MaintenanceCost] >= 0");
+                    table.CheckConstraint("CK_Maintenances_OneResourceOnly", "\r\n(\r\n    ([LabId] IS NOT NULL AND [EquipmentId] IS NULL)\r\n    OR\r\n    ([LabId] IS NULL AND [EquipmentId] IS NOT NULL)\r\n)");
+                    table.CheckConstraint("CK_Maintenances_StartTime_EndTime", "[StartTime] < [EndTime]");
+                    table.CheckConstraint("CK_Maintenances_Status", "[Status] IN ('Scheduled', 'InProgress', 'Completed', 'Cancelled')");
                     table.ForeignKey(
                         name: "FK_Maintenances_Equipments_EquipmentId",
                         column: x => x.EquipmentId,
@@ -377,6 +403,10 @@ namespace Infrastructure.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_Waitlists", x => x.WaitlistId);
+                    table.CheckConstraint("CK_Waitlists_OneResourceOnly", "\r\n(\r\n    ([LabId] IS NOT NULL AND [EquipmentId] IS NULL)\r\n    OR\r\n    ([LabId] IS NULL AND [EquipmentId] IS NOT NULL)\r\n)");
+                    table.CheckConstraint("CK_Waitlists_QueuePosition", "[QueuePosition] > 0");
+                    table.CheckConstraint("CK_Waitlists_RequestedStart_RequestedEnd", "[RequestedStart] < [RequestedEnd]");
+                    table.CheckConstraint("CK_Waitlists_Status", "[Status] IN ('Waiting', 'Notified', 'Booked', 'Cancelled', 'Expired')");
                     table.ForeignKey(
                         name: "FK_Waitlists_Equipments_EquipmentId",
                         column: x => x.EquipmentId,
@@ -412,6 +442,8 @@ namespace Infrastructure.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_UsageLogs", x => x.LogId);
+                    table.CheckConstraint("CK_UsageLogs_Checkin_Checkout", "[ActualCheckout] IS NULL OR [ActualCheckin] <= [ActualCheckout]");
+                    table.CheckConstraint("CK_UsageLogs_IncidentStatus", "[IncidentStatus] IN ('None', 'DamageReported', 'LateCheckout', 'MissingEquipment', 'Other')");
                     table.ForeignKey(
                         name: "FK_UsageLogs_BookingItems_BookingItemId",
                         column: x => x.BookingItemId,
@@ -468,9 +500,9 @@ namespace Infrastructure.Migrations
                 column: "EquipmentId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_BookingItems_LabId_EquipmentId",
+                name: "IX_BookingItems_LabId",
                 table: "BookingItems",
-                columns: new[] { "LabId", "EquipmentId" });
+                column: "LabId");
 
             migrationBuilder.CreateIndex(
                 name: "IX_Bookings_ApprovedById",
@@ -481,6 +513,11 @@ namespace Infrastructure.Migrations
                 name: "IX_Bookings_PriorityRuleId",
                 table: "Bookings",
                 column: "PriorityRuleId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Bookings_StartTime_EndTime",
+                table: "Bookings",
+                columns: new[] { "StartTime", "EndTime" });
 
             migrationBuilder.CreateIndex(
                 name: "IX_Bookings_Status",
