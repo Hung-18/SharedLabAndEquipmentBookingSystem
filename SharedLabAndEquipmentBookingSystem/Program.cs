@@ -31,12 +31,7 @@ var app = builder.Build();
 app.UseMiddleware<GlobalExceptionMiddleware>();
 
 // kích hoạt trigger ở trong db
-using (var scope = app.Services.CreateScope())
-{
-    var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-    await dbContext.Database.MigrateAsync();
-    await dbContext.EnsureDatabaseGuardsCreatedAsync();
-}
+
 
 
 // Configure the HTTP request pipeline.
