@@ -15,6 +15,16 @@ namespace Infrastructure.Repository
         {
         }
 
+        public async Task<User?> GetUserByIdAsync(
+            int userId,
+            CancellationToken cancellationToken = default)
+        {
+            return await Context.Users
+                .Include(x => x.Role)
+                .Include(x => x.Department)
+                .FirstOrDefaultAsync(x => x.UserId == userId, cancellationToken);
+        }
+
         public async Task<User?> GetByUsernameAsync(
             string username,
             CancellationToken cancellationToken = default)
@@ -29,9 +39,7 @@ namespace Infrastructure.Repository
                     cancellationToken);
         }
 
-        public async Task<User?> GetByEmailAsync(
-            string email,
-            CancellationToken cancellationToken = default)
+        public async Task<User?> GetByEmailAsync(string email,CancellationToken cancellationToken = default)
         {
             var normalizedEmail = email.Trim().ToLower();
 

@@ -9,6 +9,8 @@ namespace Domain.Interfaces
     {
         Task<RefreshToken?> GetByTokenAsync(string token, CancellationToken cancellationToken = default);
 
+        Task AddRefreshTokenAsync(RefreshToken refreshToken);
+
         Task<IReadOnlyList<RefreshToken>> GetActiveByUserIdAsync(int userId, CancellationToken cancellationToken = default);
 
         Task RevokeAllByUserIdAsync(int userId, CancellationToken cancellationToken = default);
