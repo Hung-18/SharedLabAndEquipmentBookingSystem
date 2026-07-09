@@ -7,6 +7,7 @@ namespace Domain.Interfaces
 {
     public interface IUserRepository : IBaseRepository<User>
     {
+        Task<User?> GetUserByIdAsync(int id, CancellationToken cancellation);
         Task<User?> GetByUsernameAsync(string username, CancellationToken cancellationToken = default);
 
         Task<User?> GetByEmailAsync(string email, CancellationToken cancellationToken = default);

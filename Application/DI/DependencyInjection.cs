@@ -1,0 +1,27 @@
+﻿using Microsoft.Extensions.DependencyInjection;
+using System;
+using System.Collections.Generic;
+using System.Runtime.CompilerServices;
+using System.Text;
+using AutoMapper;
+using Application.Interfaces;
+using Application.Services; // or AutoMapper.Extensions.Microsoft.DependencyInjection
+
+namespace Application.DI
+{
+    public static class DependencyInjection
+    {
+        public static IServiceCollection AddApplicationServices(this IServiceCollection servicces)
+        {
+            // provide a config action so overload resolution is unambiguous
+            servicces.AddAutoMapper(cfg => { }, typeof(DependencyInjection).Assembly);
+
+            servicces.AddScoped<IJwtService,JWTService>();
+            servicces.AddScoped<IUserService, UserService>();
+            servicces.AddScoped<IAuthService, AuthService>();
+            servicces.AddScoped<ICurrentUserService, CurrentUserService>();
+
+            return servicces;
+        }
+    }
+}
