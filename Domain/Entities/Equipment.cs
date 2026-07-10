@@ -26,6 +26,41 @@ namespace Domain.Entities
             UsageGuideline = usageGuideline?.Trim();
             Status = EquipmentStatus.Available;
         }
+        public void UpdateDetails(
+    int labId,
+    string equipmentName,
+    string? modelSpecs = null,
+    string? imageUrl = null,
+    string? usageGuideline = null)
+        {
+            if (labId <= 0)
+            {
+                throw new ArgumentException(
+                    "LabId phải lớn hơn 0.");
+            }
+
+            if (string.IsNullOrWhiteSpace(equipmentName))
+            {
+                throw new ArgumentException(
+                    "Tên thiết bị không được để trống.");
+            }
+
+            LabId = labId;
+            EquipmentName = equipmentName.Trim();
+            ModelSpecs = modelSpecs?.Trim();
+            ImageUrl = imageUrl?.Trim();
+            UsageGuideline = usageGuideline?.Trim();
+        }
+
+        public void Retire()
+        {
+            if (Status == EquipmentStatus.Retired)
+            {
+                return;
+            }
+
+            Status = EquipmentStatus.Retired;
+        }
 
         public int EquipmentId { get; private set; }
 

@@ -21,7 +21,8 @@ namespace Application.DI
             servicces.AddScoped<IAuthService, AuthService>();
             servicces.AddScoped<ICurrentUserService, CurrentUserService>();
            servicces.AddScoped<ILabRoomService, LabRoomService>();
-           
+            servicces.AddScoped<IEquipmentService, EquipmentService>();
+
 
             return servicces;
         }
