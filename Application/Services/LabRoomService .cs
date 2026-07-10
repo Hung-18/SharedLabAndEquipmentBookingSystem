@@ -139,12 +139,56 @@ public class LabRoomService : ILabRoomService
         };
     }
 
-    public Task UpdateAsync(
-        int id,
-        UpdateLabRoomRequest request,
-        CancellationToken cancellationToken)
+    public async Task UpdateAsync(
+     int id,
+     UpdateLabRoomRequest request,
+     CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        ArgumentNullException.ThrowIfNull(request);
+
+        var room = await _repository.GetByIdAsync(
+            id,
+            cancellationToken);
+
+        if (room is null)
+        {
+            throw new KeyNotFoundException(
+                $"Không tìm thấy phòng lab có ID {id}.");
+        }
+
+        room.UpdateDetails(
+            request.LabName,
+            request.Location,
+            request.Capacity,
+            request.ImageUrl,
+            request.UsageGuideline);
+
+        _repository.Update(room);
+
+        await _unitOfWork.SaveChangesAsync(
+            cancellationToken);
+    }
+    //soft delete không bị xóa khỏi database chỉ đổi status thành Inactive, không hiển thị trong danh sách phòng lab
+    public async Task DeleteAsync(
+    int id,
+    CancellationToken cancellationToken)
+    {
+        var room = await _repository.GetByIdAsync(
+            id,
+            cancellationToken);
+
+        if (room is null)
+        {
+            throw new KeyNotFoundException(
+                $"Không tìm thấy phòng lab có ID {id}.");
+        }
+
+        room.Deactivate();
+
+        _repository.Update(room);
+
+        await _unitOfWork.SaveChangesAsync(
+            cancellationToken);
     }
 
 }

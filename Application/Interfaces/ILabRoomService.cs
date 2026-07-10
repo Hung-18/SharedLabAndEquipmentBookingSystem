@@ -29,6 +29,9 @@ namespace Application.Interfaces
             int id,
             UpdateLabRoomRequest request,
             CancellationToken cancellationToken);
+        Task DeleteAsync(
+    int id,
+    CancellationToken cancellationToken);
 
     }
 }

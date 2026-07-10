@@ -74,5 +74,18 @@ namespace API.Controllers
 
             return NoContent();
         }
+        [HttpDelete("{id:int}")]
+        [ProducesResponseType(StatusCodes.Status204NoContent)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> Delete(
+    int id,
+    CancellationToken cancellationToken)
+        {
+            await _labRoomService.DeleteAsync(
+                id,
+                cancellationToken);
+
+            return NoContent();
+        }
     }
 }
