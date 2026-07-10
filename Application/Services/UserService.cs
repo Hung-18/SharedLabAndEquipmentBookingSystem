@@ -88,6 +88,7 @@ namespace Application.Services
                 DateTime.UtcNow.AddDays(7)
             );
             await _refreshTokenRepository.AddRefreshTokenAsync(newTokenEntity);
+            await _unitOfWork.SaveChangesAsync(cancelationToken);
             return new AuthResponseDTO
             {
                 AccessToken = newAccessToken,

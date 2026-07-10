@@ -1,11 +1,11 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+﻿using Application.Interfaces;
+using Application.Services; // or AutoMapper.Extensions.Microsoft.DependencyInjection
+using AutoMapper;
+using Microsoft.Extensions.DependencyInjection;
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Text;
-using AutoMapper;
-using Application.Interfaces;
-using Application.Services; // or AutoMapper.Extensions.Microsoft.DependencyInjection
 
 namespace Application.DI
 {
@@ -20,6 +20,8 @@ namespace Application.DI
             servicces.AddScoped<IUserService, UserService>();
             servicces.AddScoped<IAuthService, AuthService>();
             servicces.AddScoped<ICurrentUserService, CurrentUserService>();
+           servicces.AddScoped<ILabRoomService, LabRoomService>();
+           
 
             return servicces;
         }

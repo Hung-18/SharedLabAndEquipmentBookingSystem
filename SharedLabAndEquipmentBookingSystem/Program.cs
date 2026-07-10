@@ -52,9 +52,8 @@ app.UseMiddleware<GlobalExceptionMiddleware>();
 
 
 
-    await dbContext.Database.MigrateAsync();
-    await dbContext.EnsureDatabaseGuardsCreatedAsync();
-}
+   
+
 
 
 // Configure the HTTP request pipeline.
