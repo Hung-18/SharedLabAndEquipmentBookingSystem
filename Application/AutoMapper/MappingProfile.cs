@@ -13,7 +13,8 @@ namespace Application.AutoMapper
         {
             //map user sang authresponsedto
             CreateMap<User, AuthResponseDTO>();
-
+            //map user sang userDTO
+            CreateMap<User, UserDTO>();
         }
     }
 }

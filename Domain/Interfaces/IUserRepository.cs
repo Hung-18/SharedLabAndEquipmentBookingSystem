@@ -29,6 +29,8 @@ namespace Domain.Interfaces
             string email,
             int? excludeUserId = null,
             CancellationToken cancellationToken = default);
+
+        Task AddUserAsync(User user, CancellationToken cancellationToken = default);
     }
 
 }

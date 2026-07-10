@@ -18,13 +18,26 @@ namespace Application.Services
         private readonly IRefreshTokenRepository _refreshTokenRepository;
         private readonly IUnitOfWork _unitOfWork;
         private readonly IMapper _mapper;
-        public UserService(IUserRepository userRepository, IJwtService jwtService, IRefreshTokenRepository refreshTokenRopository, IUnitOfWork unitOfWork, IMapper iMapper)
+        private readonly ICurrentUserService _currentUserService;
+        public UserService(IUserRepository userRepository, IJwtService jwtService, IRefreshTokenRepository refreshTokenRopository, IUnitOfWork unitOfWork, IMapper iMapper, ICurrentUserService currentUserService)
         {
             _userRepository = userRepository;
             _jwtService = jwtService;
             _refreshTokenRepository = refreshTokenRopository;
             _unitOfWork = unitOfWork;
             _mapper = iMapper;
+            _currentUserService = currentUserService;
+        }
+
+        public async Task<UserDTO> GetUserByIdServiceAsync(CancellationToken cancelation)
+        {
+            var currentUserId = _currentUserService.UserId;
+            if (currentUserId == null) return null;
+
+            var user = await _userRepository.GetByIdAsync(currentUserId.Value, cancelation);
+            if (user == null) return null;
+            var newUser = _mapper.Map<UserDTO>(user);
+            return newUser;
         }
         public async Task<AuthResponseDTO> LoginAsync(LoginRequestDTO loginRequestDTO, CancellationToken cancelationToken)
         {
@@ -107,6 +120,31 @@ namespace Application.Services
             await _unitOfWork.SaveChangesAsync();
 
             return true;
+        }
+
+        public async Task<UserDTO> CreateUserAsync(CreateUserDTO createUserDTO, CancellationToken cancelation)
+        {
+            var existUser = await _userRepository.IsUsernameExistsAsync(createUserDTO.Email);
+            if (existUser) throw new InvalidOperationException("UserNawe exist in system");
+            var existEmail = await _userRepository.IsEmailExistsAsync(createUserDTO.Username);
+            if(existEmail) throw new InvalidOperationException("Email exist in system");
+            var hash = BCrypt.Net.BCrypt.HashPassword(createUserDTO.Password);
+
+            var roleId = (int)createUserDTO.Role;
+            var newUser = new User
+                (
+                    roleId: roleId,
+                    departmentId: createUserDTO.DepartmentId,
+                    fullName: createUserDTO.FullName,
+                    username: createUserDTO.Username,
+                    email: createUserDTO.Email,
+                    passwordHash: hash
+                );
+
+            await _userRepository.AddUserAsync(newUser);
+            await _unitOfWork.SaveChangesAsync();
+
+            return _mapper.Map<UserDTO>(newUser);
         }
     }
 }

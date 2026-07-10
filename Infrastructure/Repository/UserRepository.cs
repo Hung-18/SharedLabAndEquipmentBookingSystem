@@ -39,7 +39,7 @@ namespace Infrastructure.Repository
                     cancellationToken);
         }
 
-        public async Task<User?> GetByEmailAsync(string email,CancellationToken cancellationToken = default)
+        public async Task<User?> GetByEmailAsync(string email, CancellationToken cancellationToken = default)
         {
             var normalizedEmail = email.Trim().ToLower();
 
@@ -123,6 +123,10 @@ namespace Infrastructure.Repository
                          && (excludeUserId == null || x.UserId != excludeUserId.Value),
                     cancellationToken);
         }
-    }
 
+        public async Task AddUserAsync(User user, CancellationToken cancellationToken = default)
+        {
+            await Context.Users.AddAsync(user, cancellationToken);
+        }
+    }
 }
