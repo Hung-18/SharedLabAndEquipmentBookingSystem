@@ -31,6 +31,8 @@ namespace Infrastructure.AppDbContext
         public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
         public DbSet<Notification> Notifications => Set<Notification>();
 
+        public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
+
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
@@ -50,6 +52,7 @@ namespace Infrastructure.AppDbContext
             ConfigureAuditLog(modelBuilder);
             ConfigureRefreshToken(modelBuilder);
             ConfigureNotification(modelBuilder);
+            ConfigurePasswordResetToken(modelBuilder);
 
             SeedData(modelBuilder);
         }
@@ -294,6 +297,25 @@ namespace Infrastructure.AppDbContext
                     .WithMany(x => x.Users)
                     .HasForeignKey(x => x.DepartmentId)
                     .OnDelete(DeleteBehavior.Restrict);
+            });
+        }
+
+        private static void ConfigurePasswordResetToken(ModelBuilder modelBuilder)
+        {
+            modelBuilder.Entity<PasswordResetToken>(entity =>
+            {
+                entity.ToTable("PasswordResetTokens");
+                entity.HasKey(x => x.TokenId);
+                entity.Property(x => x.Email)
+                    .HasMaxLength(150)
+                    .IsRequired();
+                entity.Property(x => x.Token)
+                    .HasMaxLength(500)
+                    .IsRequired();
+                entity.Property(x => x.ExpiryDate)
+                    .IsRequired();
+                entity.HasIndex(x => x.Token)
+                    .IsUnique();
             });
         }
 

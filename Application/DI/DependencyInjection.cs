@@ -7,6 +7,7 @@ using AutoMapper;
 using Application.Interfaces;
 using Application.Services; // or AutoMapper.Extensions.Microsoft.DependencyInjection
 
+
 namespace Application.DI
 {
     public static class DependencyInjection
@@ -20,6 +21,7 @@ namespace Application.DI
             servicces.AddScoped<IUserService, UserService>();
             servicces.AddScoped<IAuthService, AuthService>();
             servicces.AddScoped<ICurrentUserService, CurrentUserService>();
+            
 
             return servicces;
         }

@@ -1,4 +1,6 @@
-﻿using Domain.Interfaces;
+﻿using Application.Interfaces;
+using Domain.Interfaces;
+using Infrastructure.Repository.Email;
 using Microsoft.Extensions.DependencyInjection;
 using System;
 using System.Collections.Generic;
@@ -26,6 +28,8 @@ namespace Infrastructure.Repository
             services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
             services.AddScoped<INotificationRepository, NotificationRepository>();
             services.AddScoped<IUnitOfWork, UnitOfWork>();
+            services.AddScoped<IPasswordResetTokenRepository, PasswordResetTokenRepository>();
+            services.AddScoped<IEmailService, EmailService>();
 
             return services;
         }

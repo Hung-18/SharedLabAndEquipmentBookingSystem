@@ -4,6 +4,7 @@ using Domain.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.AspNetCore.Identity.Data;
 using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;
 
@@ -71,6 +72,17 @@ namespace API.Controllers
         {
             var user = await _userService.CreateUserAsync(createUserDTO, cancelationToken);
             return StatusCode(StatusCodes.Status201Created, user);
+        }
+
+        [HttpPost("forgotpassword")]
+        public async Task<IActionResult> ForgotPassword([FromBody]ForgotPasswordRequest request, CancellationToken cancelationToken)
+        {
+            var user = await _userService.ForgotPasswordAsync(request.Email, cancelationToken);
+            return Ok(new
+            {
+                Success = true,
+                Message = "Nếu email này tồn tại trong hệ thống, chúng tôi đã gửi liên kết đặt lại mật khẩu cho bạn."
+            });
         }
     }
 }
