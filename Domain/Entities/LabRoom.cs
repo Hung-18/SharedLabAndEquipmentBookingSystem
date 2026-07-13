@@ -39,6 +39,37 @@ namespace Domain.Entities
             UsageGuideline = usageGuideline?.Trim();
             Status = LabRoomStatus.Available;
         }
+        public void UpdateDetails(
+    string labName,
+    string location,
+    int capacity,
+    string? imageUrl = null,
+    string? usageGuideline = null)
+        {
+            if (string.IsNullOrWhiteSpace(labName))
+            {
+                throw new ArgumentException(
+                    "Tên phòng lab không được để trống.");
+            }
+
+            if (string.IsNullOrWhiteSpace(location))
+            {
+                throw new ArgumentException(
+                    "Vị trí không được để trống.");
+            }
+
+            if (capacity <= 0)
+            {
+                throw new ArgumentException(
+                    "Sức chứa phải lớn hơn 0.");
+            }
+
+            LabName = labName.Trim();
+            Location = location.Trim();
+            Capacity = capacity;
+            ImageUrl = imageUrl?.Trim();
+            UsageGuideline = usageGuideline?.Trim();
+        }
 
         public int LabId { get; private set; }
 
@@ -59,6 +90,10 @@ namespace Domain.Entities
         public LabRoomStatus Status { get; private set; } = LabRoomStatus.Available;
 
         public User? Manager { get; private set; }
+        public void Deactivate()
+        {
+            Status = LabRoomStatus.Inactive;
+        }
 
         public ICollection<Equipment> Equipments { get; private set; } = new List<Equipment>();
 

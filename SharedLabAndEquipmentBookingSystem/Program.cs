@@ -103,6 +103,14 @@ var app = builder.Build();
 // Nối middleware xử lý lỗi toàn cục 
 app.UseMiddleware<GlobalExceptionMiddleware>();
 
+// kích hoạt trigger ở trong db
+
+
+
+   
+
+
+
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
