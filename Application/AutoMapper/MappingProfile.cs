@@ -15,6 +15,8 @@ namespace Application.AutoMapper
             CreateMap<User, AuthResponseDTO>();
             //map user sang userDTO
             CreateMap<User, UserDTO>();
+
+            
         }
     }
 }

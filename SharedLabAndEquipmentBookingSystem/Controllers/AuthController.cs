@@ -4,6 +4,7 @@ using Domain.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.AspNetCore.Identity.Data;
 using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;
 
@@ -15,12 +16,14 @@ namespace API.Controllers
     {
         private readonly IUserService _userService;
         private readonly IRefreshTokenRepository _refreshTokenRepository;
+        private readonly IAuthService _authService;
 
 
-        public AuthController(IUserService userService, IRefreshTokenRepository refreshTokenRepository)
+        public AuthController(IUserService userService, IRefreshTokenRepository refreshTokenRepository, IAuthService authService)
         {
             _userService = userService;
             _refreshTokenRepository = refreshTokenRepository;
+            _authService = authService;
         }
 
         [Authorize]
@@ -49,7 +52,7 @@ namespace API.Controllers
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] LoginRequestDTO loginRequestDTO, CancellationToken cancelationToken)
         {
-            var authResponse = await _userService.LoginAsync(loginRequestDTO, cancelationToken);
+            var authResponse = await _authService.LoginAsync(loginRequestDTO, cancelationToken);
             if (authResponse == null) return Unauthorized("Invalid Email or Password");
             return Ok(authResponse);
         }
@@ -60,7 +63,7 @@ namespace API.Controllers
             {
                 return BadRequest("Refresh token is required");
             }
-            var result = await _userService.LogoutAsync(refreshToken.RefreshToken, cancelationToken);
+            var result = await _authService.LogoutAsync(refreshToken.RefreshToken, cancelationToken);
             if (!result) return BadRequest("Invalid Token");
             return Ok("Logged out successfully");
         }
@@ -71,6 +74,17 @@ namespace API.Controllers
         {
             var user = await _userService.CreateUserAsync(createUserDTO, cancelationToken);
             return StatusCode(StatusCodes.Status201Created, user);
+        }
+
+        [HttpPost("forgotpassword")]
+        public async Task<IActionResult> ForgotPassword([FromBody]ForgotPasswordRequest request, CancellationToken cancelationToken)
+        {
+            var user = await _userService.ForgotPasswordAsync(request.Email, cancelationToken);
+            return Ok(new
+            {
+                Success = true,
+                Message = "Nếu email này tồn tại trong hệ thống, chúng tôi đã gửi liên kết đặt lại mật khẩu cho bạn."
+            });
         }
     }
 }

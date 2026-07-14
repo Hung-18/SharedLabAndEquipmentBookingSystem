@@ -106,5 +106,18 @@ namespace Domain.Entities
             RestrictionUntil = null;
             Status = UserStatus.Active;
         }
+        
+        public void SetPassword(string pass)
+        {
+            if (!string.IsNullOrEmpty(pass))
+            {
+                throw new ArgumentException("Pass can't null here");
+            }
+            if(pass.Length <= 6)
+            {
+                throw new ArgumentException("Pass must greater than 6 character");
+            }
+            PasswordHash = pass;
+        }
     }
 }
