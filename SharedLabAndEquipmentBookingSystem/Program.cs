@@ -1,3 +1,4 @@
+using API.BackgroundServices;
 using API.Middleware;
 using Application.DI;
 using Infrastructure.AppDbContext;
@@ -7,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi;
 using System.Text;
+
 
 
 var builder = WebApplication.CreateBuilder(args);
@@ -96,7 +98,7 @@ builder.Services.AddCors(options =>
 });
 
 builder.Services.AddHttpContextAccessor();
-
+builder.Services.AddHostedService<BookingReminderBackgroundService>();
 
 var app = builder.Build();
 

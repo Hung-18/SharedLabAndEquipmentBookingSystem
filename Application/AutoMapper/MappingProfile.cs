@@ -1,4 +1,4 @@
-﻿using Application.DTOs;
+﻿using Application.DTOs.Auth;
 using AutoMapper;
 using Domain.Entities;
 using System;

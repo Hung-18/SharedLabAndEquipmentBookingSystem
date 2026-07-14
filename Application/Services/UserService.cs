@@ -1,4 +1,4 @@
-﻿using Application.DTOs;
+﻿using Application.DTOs.Auth;
 using Application.Interfaces;
 using AutoMapper;
 using BCrypt.Net;
@@ -151,7 +151,7 @@ namespace Application.Services
             Console.WriteLine($"Token of {email} is {token}");
             return true;
         }
-        public async Task<bool> ResetPasswordAsync(Application.DTOs.ResetPasswordRequest request, CancellationToken cancellation)
+        public async Task<bool> ResetPasswordAsync(DTOs.Auth.ResetPasswordRequest request, CancellationToken cancellation)
         {
             // 1. Tìm token
             var tokenRecord = await _passwordResetTokenRepository.GetByTokenAsync(request.Email, request.Token);

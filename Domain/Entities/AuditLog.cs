@@ -3,7 +3,9 @@ namespace Domain.Entities
 {
     public class AuditLog
     {
-        protected AuditLog() { }
+        protected AuditLog()
+        {
+        }
 
         public AuditLog(
             int userId,
@@ -15,13 +17,42 @@ namespace Domain.Entities
             string? ipAddress = null)
         {
             if (userId <= 0)
-                throw new ArgumentException("UserId phải lớn hơn 0");
+            {
+                throw new ArgumentException(
+                    "UserId phải lớn hơn 0.");
+            }
+
+            if (!Enum.IsDefined(
+                    typeof(AuditActionType),
+                    actionType))
+            {
+                throw new ArgumentException(
+                    "Loại hành động audit không hợp lệ.");
+            }
 
             if (string.IsNullOrWhiteSpace(entityName))
-                throw new ArgumentException("EntityName không được để trống");
+            {
+                throw new ArgumentException(
+                    "EntityName không được để trống.");
+            }
+
+            if (entityName.Trim().Length > 100)
+            {
+                throw new ArgumentException(
+                    "EntityName không được vượt quá 100 ký tự.");
+            }
 
             if (entityId <= 0)
-                throw new ArgumentException("EntityId phải lớn hơn 0");
+            {
+                throw new ArgumentException(
+                    "EntityId phải lớn hơn 0.");
+            }
+
+            if (ipAddress?.Trim().Length > 50)
+            {
+                throw new ArgumentException(
+                    "Địa chỉ IP không được vượt quá 50 ký tự.");
+            }
 
             UserId = userId;
             ActionType = actionType;
@@ -53,4 +84,5 @@ namespace Domain.Entities
 
         public User? User { get; private set; }
     }
+
 }
