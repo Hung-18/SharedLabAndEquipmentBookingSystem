@@ -23,9 +23,10 @@ namespace Application.DI
             servicces.AddScoped<ICurrentUserService, CurrentUserService>();
            servicces.AddScoped<ILabRoomService, LabRoomService>();
             servicces.AddScoped<IEquipmentService, EquipmentService>();
-            servicces.AddScoped<Application.Interfaces.IPriorityService, Application.Services.PriorityService>();
-
-
+            servicces.AddScoped<IMaintenanceService, MaintenanceService>();
+            servicces.AddScoped<IBookingService, BookingService>();
+            servicces.AddScoped<IWaitlistService, WaitlistService>();
+            servicces.AddScoped<IUsageLogService, UsageLogService>();
             return servicces;
         }
     }
