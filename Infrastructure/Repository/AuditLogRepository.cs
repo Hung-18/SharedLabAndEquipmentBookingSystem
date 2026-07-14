@@ -2,6 +2,7 @@
 using Domain.Interfaces;
 using Infrastructure.AppDbContext;
 using Microsoft.EntityFrameworkCore;
+using MimeKit.Cryptography;
 using System;
 using System.Collections.Generic;
 using System.Text;
@@ -10,8 +11,10 @@ namespace Infrastructure.Repository
 {
     public class AuditLogRepository : BaseRepository<AuditLog>, IAuditLogRepository
     {
+        private readonly ApplicationDbContext _context;
         public AuditLogRepository(ApplicationDbContext context) : base(context)
         {
+            _context = context;
         }
 
         public async Task<IReadOnlyList<AuditLog>> GetByUserIdAsync(
@@ -52,6 +55,13 @@ namespace Infrastructure.Repository
                     && x.EntityId == entityId)
                 .OrderByDescending(x => x.CreatedAt)
                 .ToListAsync(cancellationToken);
+        }
+
+        public async Task LogAsync(AuditLog auditLog, CancellationToken cancelation)
+        {
+            await Context.AuditLogs.AddAsync(auditLog, cancelation);
+            await Context.SaveChangesAsync();
+
         }
     }
 

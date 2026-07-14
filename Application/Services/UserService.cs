@@ -45,36 +45,6 @@ namespace Application.Services
             var newUser = _mapper.Map<UserDTO>(user);
             return newUser;
         }
-        public async Task<AuthResponseDTO> LoginAsync(LoginRequestDTO loginRequestDTO, CancellationToken cancelationToken)
-        {
-            var user = await _userRepository.GetByEmailAsync(loginRequestDTO.Email, cancelationToken);
-            if (user == null || !BCrypt.Net.BCrypt.Verify(loginRequestDTO.Password, user.PasswordHash))
-            {
-                return null;
-            }
-
-            if (user.Status != UserStatus.Active)
-            {
-                return null;
-            }
-            var accessToken = _jwtService.GenerateAccessToken(user);
-            var refreshToken = _jwtService.GenerateRefreshToken();
-            //var hashToken = BCrypt.Net.BCrypt.HashPassword(refreshToken);
-
-            var refreshTokenEntity = new RefreshToken(
-                user.UserId,
-                refreshToken,
-                DateTime.UtcNow.AddDays(7)
-            );
-            await _refreshTokenRepository.AddRefreshTokenAsync(refreshTokenEntity);
-            await _unitOfWork.SaveChangesAsync();
-
-            var response = _mapper.Map<AuthResponseDTO>(user);
-            response.AccessToken = accessToken;
-            response.RefreshToken = refreshToken;
-
-            return response;
-        }
 
         public async Task<AuthResponseDTO> RefreshTokenAsync(RefreshTokenRequest refreshTokenRequest, CancellationToken cancelationToken = default)
         {
@@ -115,19 +85,7 @@ namespace Application.Services
             };
         }
 
-        public async Task<bool> LogoutAsync(string refreshToken, CancellationToken cancelationToken)
-        {
-            var storedToken = await _refreshTokenRepository.GetByTokenAsync(refreshToken, cancelationToken);
-            if (storedToken == null || !storedToken.IsActive || storedToken.Status == RefreshTokenStatus.Revoked)
-            {
-                return false;
-            }
-
-            storedToken.Revoke();
-            await _unitOfWork.SaveChangesAsync();
-
-            return true;
-        }
+        
 
         public async Task<UserDTO> CreateUserAsync(CreateUserDTO createUserDTO, CancellationToken cancelation)
         {
