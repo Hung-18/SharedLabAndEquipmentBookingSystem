@@ -27,6 +27,11 @@ namespace Application.DI
             servicces.AddScoped<IBookingService, BookingService>();
             servicces.AddScoped<IWaitlistService, WaitlistService>();
             servicces.AddScoped<IUsageLogService, UsageLogService>();
+            servicces.AddScoped<IViolationService, ViolationService>();
+            servicces.AddScoped<IPriorityRuleService, PriorityRuleService>();
+            servicces.AddScoped<INotificationService, NotificationService>();
+            servicces.AddScoped<IAuditLogService, AuditLogService>();
+            servicces.AddScoped<IAuditLogWriter, AuditLogWriter>();
             return servicces;
         }
     }

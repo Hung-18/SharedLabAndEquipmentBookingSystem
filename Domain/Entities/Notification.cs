@@ -4,7 +4,9 @@ namespace Domain.Entities
 {
     public class Notification
     {
-        protected Notification() { }
+        protected Notification()
+        {
+        }
 
         public Notification(
             int userId,
@@ -13,13 +15,36 @@ namespace Domain.Entities
             NotificationType notificationType)
         {
             if (userId <= 0)
-                throw new ArgumentException("UserId phải lớn hơn 0");
+            {
+                throw new ArgumentException(
+                    "UserId phải lớn hơn 0.");
+            }
 
             if (string.IsNullOrWhiteSpace(title))
-                throw new ArgumentException("Tiêu đề thông báo không được để trống");
+            {
+                throw new ArgumentException(
+                    "Tiêu đề thông báo không được để trống.");
+            }
+
+            if (title.Trim().Length > 150)
+            {
+                throw new ArgumentException(
+                    "Tiêu đề thông báo không được vượt quá 150 ký tự.");
+            }
 
             if (string.IsNullOrWhiteSpace(message))
-                throw new ArgumentException("Nội dung thông báo không được để trống");
+            {
+                throw new ArgumentException(
+                    "Nội dung thông báo không được để trống.");
+            }
+
+            if (!Enum.IsDefined(
+                    typeof(NotificationType),
+                    notificationType))
+            {
+                throw new ArgumentException(
+                    "Loại thông báo không hợp lệ.");
+            }
 
             UserId = userId;
             Title = title.Trim();
@@ -47,7 +72,13 @@ namespace Domain.Entities
 
         public void MarkAsRead()
         {
+            if (IsRead)
+            {
+                return;
+            }
+
             IsRead = true;
         }
     }
+
 }

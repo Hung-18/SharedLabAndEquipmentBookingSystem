@@ -1,10 +1,13 @@
-﻿
+﻿using System;
+using System.Collections.Generic;
 
 namespace Domain.Entities
 {
     public class User
     {
-        protected User() { }
+        protected User()
+        {
+        }
 
         public User(
             int roleId,
@@ -15,22 +18,40 @@ namespace Domain.Entities
             string passwordHash)
         {
             if (roleId <= 0)
-                throw new ArgumentException("RoleId phải lớn hơn 0");
+            {
+                throw new ArgumentException(
+                    "RoleId phải lớn hơn 0.");
+            }
 
             if (departmentId <= 0)
-                throw new ArgumentException("DepartmentId phải lớn hơn 0");
+            {
+                throw new ArgumentException(
+                    "DepartmentId phải lớn hơn 0.");
+            }
 
             if (string.IsNullOrWhiteSpace(fullName))
-                throw new ArgumentException("Họ tên không được để trống");
+            {
+                throw new ArgumentException(
+                    "Họ tên không được để trống.");
+            }
 
             if (string.IsNullOrWhiteSpace(username))
-                throw new ArgumentException("Username không được để trống");
+            {
+                throw new ArgumentException(
+                    "Username không được để trống.");
+            }
 
             if (string.IsNullOrWhiteSpace(email))
-                throw new ArgumentException("Email không được để trống");
+            {
+                throw new ArgumentException(
+                    "Email không được để trống.");
+            }
 
             if (string.IsNullOrWhiteSpace(passwordHash))
-                throw new ArgumentException("PasswordHash không được để trống");
+            {
+                throw new ArgumentException(
+                    "PasswordHash không được để trống.");
+            }
 
             RoleId = roleId;
             DepartmentId = departmentId;
@@ -60,42 +81,71 @@ namespace Domain.Entities
 
         public DateTime? RestrictionUntil { get; private set; }
 
-        public UserStatus Status { get; private set; } = UserStatus.Active;
+        public UserStatus Status { get; private set; }
+            = UserStatus.Active;
 
         public Role? Role { get; private set; }
 
         public Department? Department { get; private set; }
 
-        public ICollection<Booking> Bookings { get; private set; } = new List<Booking>();
+        public ICollection<Booking> Bookings { get; private set; }
+            = new List<Booking>();
 
-        public ICollection<Booking> ApprovedBookings { get; private set; } = new List<Booking>();
+        public ICollection<Booking> ApprovedBookings { get; private set; }
+            = new List<Booking>();
 
-        public ICollection<LabRoom> ManagedLabRooms { get; private set; } = new List<LabRoom>();
+        public ICollection<LabRoom> ManagedLabRooms { get; private set; }
+            = new List<LabRoom>();
 
-        public ICollection<Maintenance> CreatedMaintenances { get; private set; } = new List<Maintenance>();
+        public ICollection<Maintenance> CreatedMaintenances { get; private set; }
+            = new List<Maintenance>();
 
-        public ICollection<Violation> Violations { get; private set; } = new List<Violation>();
+        public ICollection<Violation> Violations { get; private set; }
+            = new List<Violation>();
 
-        public ICollection<Waitlist> Waitlists { get; private set; } = new List<Waitlist>();
+        public ICollection<Waitlist> Waitlists { get; private set; }
+            = new List<Waitlist>();
 
-        public ICollection<AuditLog> AuditLogs { get; private set; } = new List<AuditLog>();
+        public ICollection<AuditLog> AuditLogs { get; private set; }
+            = new List<AuditLog>();
 
-        public ICollection<RefreshToken> RefreshTokens { get; private set; } = new List<RefreshToken>();
+        public ICollection<RefreshToken> RefreshTokens { get; private set; }
+            = new List<RefreshToken>();
 
-        public ICollection<Notification> Notifications { get; private set; } = new List<Notification>();
+        public ICollection<Notification> Notifications { get; private set; }
+            = new List<Notification>();
 
         public void AddPenaltyPoints(int points)
         {
             if (points <= 0)
-                throw new ArgumentException("Điểm phạt phải lớn hơn 0");
+            {
+                throw new ArgumentException(
+                    "Điểm phạt phải lớn hơn 0.");
+            }
 
             PenaltyPoints += points;
+        }
+
+        public void RemovePenaltyPoints(int points)
+        {
+            if (points <= 0)
+            {
+                throw new ArgumentException(
+                    "Điểm phạt cần trừ phải lớn hơn 0.");
+            }
+
+            PenaltyPoints = Math.Max(
+                0,
+                PenaltyPoints - points);
         }
 
         public void RestrictUntil(DateTime restrictionUntil)
         {
             if (restrictionUntil <= DateTime.UtcNow)
-                throw new ArgumentException("Thời gian hạn chế phải lớn hơn hiện tại");
+            {
+                throw new ArgumentException(
+                    "Thời gian hạn chế phải lớn hơn thời điểm hiện tại.");
+            }
 
             RestrictionUntil = restrictionUntil;
             Status = UserStatus.Restricted;
@@ -106,17 +156,21 @@ namespace Domain.Entities
             RestrictionUntil = null;
             Status = UserStatus.Active;
         }
-        
+
         public void SetPassword(string pass)
         {
-            if (!string.IsNullOrEmpty(pass))
+            if (string.IsNullOrWhiteSpace(pass))
             {
-                throw new ArgumentException("Pass can't null here");
+                throw new ArgumentException(
+                    "Mật khẩu không được để trống.");
             }
-            if(pass.Length <= 6)
+
+            if (pass.Length <= 6)
             {
-                throw new ArgumentException("Pass must greater than 6 character");
+                throw new ArgumentException(
+                    "Mật khẩu phải có nhiều hơn 6 ký tự.");
             }
+
             PasswordHash = pass;
         }
     }
