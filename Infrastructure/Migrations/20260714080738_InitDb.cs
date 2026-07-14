@@ -30,6 +30,21 @@ namespace Infrastructure.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "PasswordResetTokens",
+                columns: table => new
+                {
+                    TokenId = table.Column<int>(type: "int", nullable: false)
+                        .Annotation("SqlServer:Identity", "1, 1"),
+                    Email = table.Column<string>(type: "nvarchar(150)", maxLength: 150, nullable: false),
+                    Token = table.Column<string>(type: "nvarchar(500)", maxLength: 500, nullable: false),
+                    ExpiryDate = table.Column<DateTime>(type: "datetime2", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_PasswordResetTokens", x => x.TokenId);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "PriorityRules",
                 columns: table => new
                 {
@@ -572,6 +587,12 @@ namespace Infrastructure.Migrations
                 column: "UserId");
 
             migrationBuilder.CreateIndex(
+                name: "IX_PasswordResetTokens_Token",
+                table: "PasswordResetTokens",
+                column: "Token",
+                unique: true);
+
+            migrationBuilder.CreateIndex(
                 name: "IX_PriorityRules_PurposeType",
                 table: "PriorityRules",
                 column: "PurposeType",
@@ -658,6 +679,9 @@ namespace Infrastructure.Migrations
 
             migrationBuilder.DropTable(
                 name: "Notifications");
+
+            migrationBuilder.DropTable(
+                name: "PasswordResetTokens");
 
             migrationBuilder.DropTable(
                 name: "RefreshTokens");
