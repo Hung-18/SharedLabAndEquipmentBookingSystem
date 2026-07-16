@@ -77,7 +77,9 @@ namespace API.BackgroundServices
 
             foreach (var booking in bookings
                          .Where(x =>
-                             x.Status == BookingStatus.Approved))
+                             x.Status == BookingStatus.Approved
+                             && x.StartTime >= from
+                             && x.StartTime <= to))
             {
                 string title =
                     $"Nhắc lịch booking #{booking.BookingId}";

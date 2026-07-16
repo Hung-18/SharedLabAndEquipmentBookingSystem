@@ -3,9 +3,6 @@ using Domain.Entities;
 using Domain.Interfaces;
 using Infrastructure.AppDbContext;
 using Microsoft.EntityFrameworkCore;
-using System;
-using System.Collections.Generic;
-using System.Text;
 
 namespace Infrastructure.Repository
 {
@@ -22,8 +19,11 @@ namespace Infrastructure.Repository
             return await Context.Maintenances
                 .Include(x => x.LabRoom)
                 .Include(x => x.Equipment)
+                    .ThenInclude(x => x!.LabRoom)
                 .Include(x => x.CreatedBy)
-                .FirstOrDefaultAsync(x => x.MaintenanceId == maintenanceId, cancellationToken);
+                .FirstOrDefaultAsync(
+                    x => x.MaintenanceId == maintenanceId,
+                    cancellationToken);
         }
 
         public async Task<IReadOnlyList<Maintenance>> GetByResourceAsync(
@@ -38,14 +38,10 @@ namespace Infrastructure.Repository
                 .AsQueryable();
 
             if (labId.HasValue)
-            {
                 query = query.Where(x => x.LabId == labId.Value);
-            }
 
             if (equipmentId.HasValue)
-            {
                 query = query.Where(x => x.EquipmentId == equipmentId.Value);
-            }
 
             return await query
                 .OrderByDescending(x => x.StartTime)
@@ -100,15 +96,29 @@ namespace Infrastructure.Repository
                 MaintenanceStatus.InProgress
             };
 
+            int? equipmentLabId = null;
+            if (equipmentId.HasValue)
+            {
+                equipmentLabId = await Context.Equipments
+                    .Where(x => x.EquipmentId == equipmentId.Value)
+                    .Select(x => (int?)x.LabId)
+                    .FirstOrDefaultAsync(cancellationToken);
+            }
+
             return await Context.Maintenances
                 .AnyAsync(
                     x => blockingStatuses.Contains(x.Status)
                          && x.StartTime < endTime
                          && x.EndTime > startTime
-                         && (excludeMaintenanceId == null || x.MaintenanceId != excludeMaintenanceId.Value)
+                         && (excludeMaintenanceId == null
+                             || x.MaintenanceId != excludeMaintenanceId.Value)
                          && (
-                             (labId.HasValue && x.LabId == labId.Value)
-                             || (equipmentId.HasValue && x.EquipmentId == equipmentId.Value)
+                             (labId.HasValue
+                              && x.LabId == labId.Value)
+                             || (equipmentId.HasValue
+                                 && (x.EquipmentId == equipmentId.Value
+                                     || (equipmentLabId.HasValue
+                                         && x.LabId == equipmentLabId.Value)))
                          ),
                     cancellationToken);
         }
@@ -127,16 +137,20 @@ namespace Infrastructure.Repository
                 : new[] { BookingStatus.Approved };
 
             return await Context.BookingItems
-                .Include(x => x.Booking)
                 .AnyAsync(
                     x => x.Booking != null
                          && blockingStatuses.Contains(x.Booking.Status)
                          && x.Booking.StartTime < endTime
                          && x.Booking.EndTime > startTime
-                         && (excludeBookingId == null || x.BookingId != excludeBookingId.Value)
+                         && (excludeBookingId == null
+                             || x.BookingId != excludeBookingId.Value)
                          && (
-                             (labId.HasValue && x.LabId == labId.Value)
-                             || (equipmentId.HasValue && x.EquipmentId == equipmentId.Value)
+                             (labId.HasValue
+                              && (x.LabId == labId.Value
+                                  || (x.Equipment != null
+                                      && x.Equipment.LabId == labId.Value)))
+                             || (equipmentId.HasValue
+                                 && x.EquipmentId == equipmentId.Value)
                          ),
                     cancellationToken);
         }
@@ -151,17 +165,12 @@ namespace Infrastructure.Repository
                 .AsQueryable();
 
             if (from.HasValue)
-            {
                 query = query.Where(x => x.StartTime >= from.Value);
-            }
 
             if (to.HasValue)
-            {
                 query = query.Where(x => x.StartTime <= to.Value);
-            }
 
             return await query.SumAsync(x => x.MaintenanceCost, cancellationToken);
         }
     }
-
 }

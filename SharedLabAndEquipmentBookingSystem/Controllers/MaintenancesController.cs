@@ -1,9 +1,11 @@
 ﻿using Application.DTOs.Maintenances;
 using Application.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace API.Controllers
 {
+    [Authorize]
     [Route("api/[controller]")]
     [ApiController]
     public class MaintenancesController : ControllerBase
@@ -21,9 +23,8 @@ namespace API.Controllers
         public async Task<IActionResult> GetAll(
             CancellationToken cancellationToken)
         {
-            var result =
-                await _maintenanceService.GetAllAsync(
-                    cancellationToken);
+            var result = await _maintenanceService.GetAllAsync(
+                cancellationToken);
 
             return Ok(result);
         }
@@ -35,10 +36,9 @@ namespace API.Controllers
             int id,
             CancellationToken cancellationToken)
         {
-            var result =
-                await _maintenanceService.GetByIdAsync(
-                    id,
-                    cancellationToken);
+            var result = await _maintenanceService.GetByIdAsync(
+                id,
+                cancellationToken);
 
             if (result is null)
             {
@@ -54,10 +54,9 @@ namespace API.Controllers
             int labId,
             CancellationToken cancellationToken)
         {
-            var result =
-                await _maintenanceService.GetByLabIdAsync(
-                    labId,
-                    cancellationToken);
+            var result = await _maintenanceService.GetByLabIdAsync(
+                labId,
+                cancellationToken);
 
             return Ok(result);
         }
@@ -67,29 +66,29 @@ namespace API.Controllers
             int equipmentId,
             CancellationToken cancellationToken)
         {
-            var result =
-                await _maintenanceService.GetByEquipmentIdAsync(
-                    equipmentId,
-                    cancellationToken);
+            var result = await _maintenanceService.GetByEquipmentIdAsync(
+                equipmentId,
+                cancellationToken);
 
             return Ok(result);
         }
 
+        [Authorize(Roles = "Admin,LabManager")]
         [HttpPost]
         [ProducesResponseType(
             typeof(MaintenanceDetailResponse),
             StatusCodes.Status201Created)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
         [ProducesResponseType(StatusCodes.Status409Conflict)]
         public async Task<IActionResult> Create(
             [FromBody] CreateMaintenanceRequest request,
             CancellationToken cancellationToken)
         {
-            var result =
-                await _maintenanceService.CreateAsync(
-                    request,
-                    cancellationToken);
+            var result = await _maintenanceService.CreateAsync(
+                request,
+                cancellationToken);
 
             return CreatedAtAction(
                 nameof(GetById),
@@ -97,8 +96,10 @@ namespace API.Controllers
                 result);
         }
 
+        [Authorize(Roles = "Admin,LabManager")]
         [HttpPut("{id:int}")]
         [ProducesResponseType(StatusCodes.Status204NoContent)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
         [ProducesResponseType(StatusCodes.Status409Conflict)]
         public async Task<IActionResult> Update(
@@ -114,6 +115,7 @@ namespace API.Controllers
             return NoContent();
         }
 
+        [Authorize(Roles = "Admin,LabManager")]
         [HttpPost("{id:int}/start")]
         public async Task<IActionResult> Start(
             int id,
@@ -126,6 +128,7 @@ namespace API.Controllers
             return NoContent();
         }
 
+        [Authorize(Roles = "Admin,LabManager")]
         [HttpPost("{id:int}/complete")]
         public async Task<IActionResult> Complete(
             int id,
@@ -138,6 +141,7 @@ namespace API.Controllers
             return NoContent();
         }
 
+        [Authorize(Roles = "Admin,LabManager")]
         [HttpPost("{id:int}/cancel")]
         public async Task<IActionResult> Cancel(
             int id,

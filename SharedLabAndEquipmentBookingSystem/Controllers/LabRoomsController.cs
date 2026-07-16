@@ -1,90 +1,72 @@
 ﻿using Application.DTOs.LabRooms;
 using Application.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace API.Controllers
 {
+    [Authorize]
     [Route("api/[controller]")]
     [ApiController]
     public class LabRoomsController : ControllerBase
     {
         private readonly ILabRoomService _labRoomService;
+        public LabRoomsController(ILabRoomService labRoomService) => _labRoomService = labRoomService;
 
-        public LabRoomsController(ILabRoomService labRoomService)
-        {
-            _labRoomService = labRoomService;
-        }
-
-        // GET: api/LabRooms
         [HttpGet]
-        public async Task<IActionResult> GetAll(
-            CancellationToken cancellationToken)
-        {
-            var rooms = await _labRoomService.GetAllAsync(
-                cancellationToken);
+        public async Task<IActionResult> GetAll(CancellationToken cancellationToken) =>
+            Ok(await _labRoomService.GetAllAsync(cancellationToken));
 
-            return Ok(rooms);
-        }
+        [HttpGet("search")]
+        public async Task<IActionResult> Search(
+            [FromQuery] LabRoomSearchRequest request,
+            CancellationToken cancellationToken) =>
+            Ok(await _labRoomService.SearchAsync(request, cancellationToken));
 
-        // GET: api/LabRooms/1
         [HttpGet("{id:int}")]
-        public async Task<IActionResult> GetById(
-            int id,
-            CancellationToken cancellationToken)
+        public async Task<IActionResult> GetById(int id, CancellationToken cancellationToken)
         {
-            var room = await _labRoomService.GetByIdAsync(
-                id,
-                cancellationToken);
-
-            if (room == null)
-            {
-                return NotFound("Lab room not found");
-            }
-
-            return Ok(room);
+            var room = await _labRoomService.GetByIdAsync(id, cancellationToken);
+            return room is null ? NotFound($"Không tìm thấy phòng lab có ID {id}.") : Ok(room);
         }
 
-        // POST: api/LabRooms
+        [Authorize(Roles = "Admin")]
         [HttpPost]
         public async Task<IActionResult> Create(
             [FromBody] CreateLabRoomRequest request,
             CancellationToken cancellationToken)
         {
-            var createdRoom = await _labRoomService.CreateAsync(
-                request,
-                cancellationToken);
-
-            return CreatedAtAction(
-                nameof(GetById),
-                new { id = createdRoom.LabId },
-                createdRoom);
+            var result = await _labRoomService.CreateAsync(request, cancellationToken);
+            return CreatedAtAction(nameof(GetById), new { id = result.LabId }, result);
         }
 
-        // PUT: api/LabRooms/1
+        [Authorize(Roles = "Admin")]
         [HttpPut("{id:int}")]
         public async Task<IActionResult> Update(
             int id,
             [FromBody] UpdateLabRoomRequest request,
             CancellationToken cancellationToken)
         {
-            await _labRoomService.UpdateAsync(
-                id,
-                request,
-                cancellationToken);
-
+            await _labRoomService.UpdateAsync(id, request, cancellationToken);
             return NoContent();
         }
-        [HttpDelete("{id:int}")]
-        [ProducesResponseType(StatusCodes.Status204NoContent)]
-        [ProducesResponseType(StatusCodes.Status404NotFound)]
-        public async Task<IActionResult> Delete(
-    int id,
-    CancellationToken cancellationToken)
-        {
-            await _labRoomService.DeleteAsync(
-                id,
-                cancellationToken);
 
+        [Authorize(Roles = "Admin")]
+        [HttpPut("{id:int}/manager")]
+        public async Task<IActionResult> ChangeManager(
+            int id,
+            [FromBody] ChangeLabRoomManagerRequest request,
+            CancellationToken cancellationToken)
+        {
+            await _labRoomService.ChangeManagerAsync(id, request, cancellationToken);
+            return NoContent();
+        }
+
+        [Authorize(Roles = "Admin")]
+        [HttpDelete("{id:int}")]
+        public async Task<IActionResult> Delete(int id, CancellationToken cancellationToken)
+        {
+            await _labRoomService.DeleteAsync(id, cancellationToken);
             return NoContent();
         }
     }

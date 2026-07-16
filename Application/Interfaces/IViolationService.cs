@@ -1,7 +1,5 @@
 ﻿using Application.DTOs.Violations;
-using System;
-using System.Collections.Generic;
-using System.Text;
+using Domain;
 
 namespace Application.Interfaces
 {
@@ -34,15 +32,17 @@ namespace Application.Interfaces
             CreateViolationRequest request,
             CancellationToken cancellationToken);
 
+        Task<ViolationResponse?> EnsureAutomaticViolationAsync(
+            int bookingId,
+            ViolationType violationType,
+            CancellationToken cancellationToken);
+
         Task ResolveAsync(
             int id,
-            ViolationActionRequest request,
             CancellationToken cancellationToken);
 
         Task CancelAsync(
             int id,
-            ViolationActionRequest request,
             CancellationToken cancellationToken);
     }
-
 }

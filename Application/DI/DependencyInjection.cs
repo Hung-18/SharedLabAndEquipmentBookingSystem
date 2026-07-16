@@ -1,43 +1,41 @@
 ﻿using Application.DTOs.Auth;
 using Application.Interfaces;
-using Application.Services; // or AutoMapper.Extensions.Microsoft.DependencyInjection
-using AutoMapper;
-using FluentValidation;
-using FluentValidation.AspNetCore;
+using Application.Services;
 using Microsoft.Extensions.DependencyInjection;
-using System;
-using System.Collections.Generic;
-using System.Runtime.CompilerServices;
-using System.Text;
-
 
 namespace Application.DI
 {
     public static class DependencyInjection
     {
-        public static IServiceCollection AddApplicationServices(this IServiceCollection servicces)
+        public static IServiceCollection AddApplicationServices(
+            this IServiceCollection services)
         {
-            // provide a config action so overload resolution is unambiguous
-            servicces.AddAutoMapper(cfg => { }, typeof(DependencyInjection).Assembly);
+            services.AddAutoMapper(
+                configuration => { },
+                typeof(DependencyInjection).Assembly);
 
-            servicces.AddScoped<IJwtService,JWTService>();
-            servicces.AddScoped<IUserService, UserService>();
-            servicces.AddScoped<IAuthService, AuthService>();
-            servicces.AddScoped<ICurrentUserService, CurrentUserService>();
-            servicces.AddScoped<ILabRoomService, LabRoomService>();
-            servicces.AddScoped<IEquipmentService, EquipmentService>();
-            servicces.AddScoped<IMaintenanceService, MaintenanceService>();
-            servicces.AddScoped<IBookingService, BookingService>();
-            servicces.AddScoped<IWaitlistService, WaitlistService>();
-            servicces.AddScoped<IUsageLogService, UsageLogService>();
-            servicces.AddScoped<IViolationService, ViolationService>();
-            servicces.AddScoped<IPriorityRuleService, PriorityRuleService>();
-            servicces.AddScoped<INotificationService, NotificationService>();
-            servicces.AddScoped<IAuditLogService, AuditLogService>();
-            servicces.AddScoped<IAuditLogWriter, AuditLogWriter>();
-            servicces.AddValidatorsFromAssemblyContaining<ResetPasswordRequestValidate>();
-            servicces.AddFluentValidationAutoValidation();
-            return servicces;
+            services.AddScoped<IJwtService, JWTService>();
+            services.AddScoped<IUserService, UserService>();
+            services.AddScoped<IAuthService, AuthService>();
+            services.AddScoped<ICurrentUserService, CurrentUserService>();
+            services.AddScoped<ILabRoomService, LabRoomService>();
+            services.AddScoped<IEquipmentService, EquipmentService>();
+            services.AddScoped<IMaintenanceService, MaintenanceService>();
+            services.AddScoped<IBookingService, BookingService>();
+            services.AddScoped<IWaitlistService, WaitlistService>();
+            services.AddScoped<IUsageLogService, UsageLogService>();
+            services.AddScoped<IViolationService, ViolationService>();
+            services.AddScoped<IPriorityRuleService, PriorityRuleService>();
+            services.AddScoped<INotificationService, NotificationService>();
+            services.AddScoped<IAuditLogService, AuditLogService>();
+            services.AddScoped<IAuditLogWriter, AuditLogWriter>();
+
+            services.AddScoped<IUserManagementService, UserManagementService>();
+            services.AddScoped<IRoleService, RoleService>();
+            services.AddScoped<IDepartmentService, DepartmentService>();
+            services.AddScoped<IReportService, ReportService>();
+
+            return services;
         }
     }
 }

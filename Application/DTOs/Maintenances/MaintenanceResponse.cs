@@ -17,5 +17,13 @@ namespace Application.DTOs.Maintenances
         public DateTime EndTime { get; set; }
 
         public string Status { get; set; } = string.Empty;
+
+        public string RecurrenceType { get; set; } = string.Empty;
+
+        public int RecurrenceInterval { get; set; }
+
+        public DateTime? RecurrenceEndDate { get; set; }
+
+        public int? ParentMaintenanceId { get; set; }
     }
 }

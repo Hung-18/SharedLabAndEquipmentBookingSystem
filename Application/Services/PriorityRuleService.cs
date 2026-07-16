@@ -3,9 +3,6 @@ using Application.Interfaces;
 using Domain;
 using Domain.Entities;
 using Domain.Interfaces;
-using System;
-using System.Collections.Generic;
-using System.Text;
 
 namespace Application.Services
 {
@@ -13,23 +10,27 @@ namespace Application.Services
     {
         private readonly IPriorityRuleRepository _repository;
         private readonly IUnitOfWork _unitOfWork;
+        private readonly IAuditLogWriter _auditLogWriter;
+        private readonly ICurrentUserService _currentUserService;
 
         public PriorityRuleService(
             IPriorityRuleRepository repository,
-            IUnitOfWork unitOfWork)
+            IUnitOfWork unitOfWork,
+            IAuditLogWriter auditLogWriter,
+            ICurrentUserService currentUserService)
         {
             _repository = repository;
             _unitOfWork = unitOfWork;
+            _auditLogWriter = auditLogWriter;
+            _currentUserService = currentUserService;
         }
 
         public async Task<List<PriorityRuleResponse>> GetAllAsync(
             CancellationToken cancellationToken)
         {
-            var rules = await _repository.GetAllAsync(
-                cancellationToken);
-
-            return rules
-                .OrderBy(x => x.PriorityLevel)
+            await GetAuthenticatedUserAsync(cancellationToken);
+            var rules = await _repository.GetAllAsync(cancellationToken);
+            return rules.OrderBy(x => x.PriorityLevel)
                 .ThenBy(x => x.PurposeType)
                 .Select(MapResponse)
                 .ToList();
@@ -38,10 +39,8 @@ namespace Application.Services
         public async Task<List<PriorityRuleResponse>> GetActiveAsync(
             CancellationToken cancellationToken)
         {
-            var rules = await _repository.GetActiveRulesAsync(
-                cancellationToken);
-
-            return rules
+            await GetAuthenticatedUserAsync(cancellationToken);
+            return (await _repository.GetActiveRulesAsync(cancellationToken))
                 .Select(MapResponse)
                 .ToList();
         }
@@ -50,29 +49,21 @@ namespace Application.Services
             int id,
             CancellationToken cancellationToken)
         {
-            var rule = await _repository.GetByIdAsync(
-                id,
-                cancellationToken);
-
-            return rule is null
-                ? null
-                : MapResponse(rule);
+            await GetAuthenticatedUserAsync(cancellationToken);
+            var rule = await _repository.GetByIdAsync(id, cancellationToken);
+            return rule is null ? null : MapResponse(rule);
         }
 
         public async Task<PriorityRuleResponse?> GetByPurposeTypeAsync(
             BookingPurposeType purposeType,
             CancellationToken cancellationToken)
         {
+            await GetAuthenticatedUserAsync(cancellationToken);
             ValidatePurposeType(purposeType);
-
-            var rule =
-                await _repository.GetByPurposeTypeAsync(
-                    purposeType,
-                    cancellationToken);
-
-            return rule is null
-                ? null
-                : MapResponse(rule);
+            var rule = await _repository.GetByPurposeTypeAsync(
+                purposeType,
+                cancellationToken);
+            return rule is null ? null : MapResponse(rule);
         }
 
         public async Task<PriorityRuleResponse> CreateAsync(
@@ -80,36 +71,28 @@ namespace Application.Services
             CancellationToken cancellationToken)
         {
             ArgumentNullException.ThrowIfNull(request);
-
-            await ValidateAdminAsync(
-                request.ActorUserId,
-                cancellationToken);
-
+            var actor = await GetCurrentAdminAsync(cancellationToken);
             ValidatePurposeType(request.PurposeType);
 
-            bool purposeTypeExists =
-                await _repository.IsPurposeTypeExistsAsync(
+            if (await _repository.IsPurposeTypeExistsAsync(
                     request.PurposeType,
                     null,
-                    cancellationToken);
-
-            if (purposeTypeExists)
-            {
+                    cancellationToken))
                 throw new InvalidOperationException(
                     $"Đã tồn tại quy tắc cho mục đích {request.PurposeType}.");
-            }
 
             var rule = new PriorityRule(
                 request.PurposeType,
                 request.PriorityLevel,
                 request.Description);
 
-            await _repository.AddAsync(
-                rule,
-                cancellationToken);
-
-            await _unitOfWork.SaveChangesAsync(
-                cancellationToken);
+            await _unitOfWork.ExecuteInTransactionAsync(async ct =>
+            {
+                await _repository.AddAsync(rule, ct);
+                await _unitOfWork.SaveChangesAsync(ct);
+                await WriteAuditAsync(actor.UserId, rule, AuditActionType.Create, null, ct);
+                await _unitOfWork.SaveChangesAsync(ct);
+            }, cancellationToken);
 
             return MapResponse(rule);
         }
@@ -120,130 +103,127 @@ namespace Application.Services
             CancellationToken cancellationToken)
         {
             ArgumentNullException.ThrowIfNull(request);
-
-            await ValidateAdminAsync(
-                request.ActorUserId,
-                cancellationToken);
-
-            var rule = await GetRuleOrThrowAsync(
-                id,
-                cancellationToken);
-
-            rule.UpdateDetails(
-                request.PriorityLevel,
-                request.Description);
-
+            var actor = await GetCurrentAdminAsync(cancellationToken);
+            var rule = await GetRuleOrThrowAsync(id, cancellationToken);
+            var oldValue = Snapshot(rule);
+            rule.UpdateDetails(request.PriorityLevel, request.Description);
             _repository.Update(rule);
-
-            await _unitOfWork.SaveChangesAsync(
+            await _auditLogWriter.WriteAsync(
+                actor.UserId,
+                AuditActionType.Update,
+                nameof(PriorityRule),
+                rule.PriorityRuleId,
+                oldValue,
+                Snapshot(rule),
                 cancellationToken);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
         }
 
-        public async Task ActivateAsync(
-            int id,
-            PriorityRuleActionRequest request,
-            CancellationToken cancellationToken)
+        public async Task ActivateAsync(int id, CancellationToken cancellationToken)
         {
-            ArgumentNullException.ThrowIfNull(request);
-
-            await ValidateAdminAsync(
-                request.ActorUserId,
-                cancellationToken);
-
-            var rule = await GetRuleOrThrowAsync(
-                id,
-                cancellationToken);
-
+            var actor = await GetCurrentAdminAsync(cancellationToken);
+            var rule = await GetRuleOrThrowAsync(id, cancellationToken);
+            if (rule.Status == PriorityRuleStatus.Active)
+                return;
+            var oldValue = Snapshot(rule);
             rule.Activate();
-
             _repository.Update(rule);
-
-            await _unitOfWork.SaveChangesAsync(
+            await _auditLogWriter.WriteAsync(
+                actor.UserId,
+                AuditActionType.Update,
+                nameof(PriorityRule),
+                rule.PriorityRuleId,
+                oldValue,
+                Snapshot(rule),
                 cancellationToken);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
         }
 
-        public async Task DeactivateAsync(
-            int id,
-            PriorityRuleActionRequest request,
-            CancellationToken cancellationToken)
+        public async Task DeactivateAsync(int id, CancellationToken cancellationToken)
         {
-            ArgumentNullException.ThrowIfNull(request);
-
-            await ValidateAdminAsync(
-                request.ActorUserId,
-                cancellationToken);
-
-            var rule = await GetRuleOrThrowAsync(
-                id,
-                cancellationToken);
-
+            var actor = await GetCurrentAdminAsync(cancellationToken);
+            var rule = await GetRuleOrThrowAsync(id, cancellationToken);
+            if (rule.Status == PriorityRuleStatus.Inactive)
+                return;
+            var oldValue = Snapshot(rule);
             rule.Deactivate();
-
             _repository.Update(rule);
-
-            await _unitOfWork.SaveChangesAsync(
+            await _auditLogWriter.WriteAsync(
+                actor.UserId,
+                AuditActionType.Update,
+                nameof(PriorityRule),
+                rule.PriorityRuleId,
+                oldValue,
+                Snapshot(rule),
                 cancellationToken);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
         }
 
-        private async Task ValidateAdminAsync(
-            int actorUserId,
+        private async Task<User> GetAuthenticatedUserAsync(
             CancellationToken cancellationToken)
         {
-            var actor =
-                await _unitOfWork.Users.GetUserByIdAsync(
-                    actorUserId,
-                    cancellationToken);
+            int actorId = _currentUserService.GetRequiredUserId();
+            var actor = await _unitOfWork.Users.GetUserByIdAsync(actorId, cancellationToken)
+                ?? throw new KeyNotFoundException($"Không tìm thấy người dùng có ID {actorId}.");
+            if (actor.Status is UserStatus.Inactive or UserStatus.Locked)
+                throw new InvalidOperationException("Tài khoản không được phép thao tác.");
+            return actor;
+        }
 
-            if (actor is null)
-            {
-                throw new KeyNotFoundException(
-                    $"Không tìm thấy người thực hiện có ID {actorUserId}.");
-            }
-
+        private async Task<User> GetCurrentAdminAsync(
+            CancellationToken cancellationToken)
+        {
+            var actor = await GetAuthenticatedUserAsync(cancellationToken);
             if (actor.Status != UserStatus.Active)
-            {
-                throw new InvalidOperationException(
-                    "Người thực hiện hiện không ở trạng thái Active.");
-            }
-
+                throw new InvalidOperationException("Tài khoản Admin phải ở trạng thái Active.");
             if (actor.Role?.RoleName != RoleName.Admin)
-            {
                 throw new UnauthorizedAccessException(
                     "Chỉ Admin được quản lý quy tắc ưu tiên.");
-            }
+            return actor;
         }
 
         private async Task<PriorityRule> GetRuleOrThrowAsync(
             int id,
             CancellationToken cancellationToken)
         {
-            var rule = await _repository.GetByIdAsync(
-                id,
-                cancellationToken);
-
-            if (rule is null)
-            {
-                throw new KeyNotFoundException(
+            return await _repository.GetByIdAsync(id, cancellationToken)
+                ?? throw new KeyNotFoundException(
                     $"Không tìm thấy quy tắc ưu tiên có ID {id}.");
-            }
-
-            return rule;
         }
 
-        private static void ValidatePurposeType(
-            BookingPurposeType purposeType)
+        private async Task WriteAuditAsync(
+            int actorId,
+            PriorityRule rule,
+            AuditActionType actionType,
+            object? oldValue,
+            CancellationToken cancellationToken)
         {
-            if (!Enum.IsDefined(
-                    typeof(BookingPurposeType),
-                    purposeType))
-            {
-                throw new ArgumentException(
-                    "Loại mục đích đặt lịch không hợp lệ.");
-            }
+            await _auditLogWriter.WriteAsync(
+                actorId,
+                actionType,
+                nameof(PriorityRule),
+                rule.PriorityRuleId,
+                oldValue,
+                Snapshot(rule),
+                cancellationToken);
         }
 
-        private static PriorityRuleResponse MapResponse(
-            PriorityRule rule)
+        private static object Snapshot(PriorityRule rule) => new
+        {
+            rule.PriorityRuleId,
+            PurposeType = rule.PurposeType.ToString(),
+            rule.PriorityLevel,
+            rule.Description,
+            Status = rule.Status.ToString()
+        };
+
+        private static void ValidatePurposeType(BookingPurposeType purposeType)
+        {
+            if (!Enum.IsDefined(purposeType))
+                throw new ArgumentException("PurposeType không hợp lệ.");
+        }
+
+        private static PriorityRuleResponse MapResponse(PriorityRule rule)
         {
             return new PriorityRuleResponse
             {
@@ -255,5 +235,4 @@ namespace Application.Services
             };
         }
     }
-
 }

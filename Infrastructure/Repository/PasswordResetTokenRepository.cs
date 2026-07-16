@@ -2,9 +2,6 @@
 using Domain.Interfaces;
 using Infrastructure.AppDbContext;
 using Microsoft.EntityFrameworkCore;
-using System;
-using System.Collections.Generic;
-using System.Text;
 
 namespace Infrastructure.Repository
 {
@@ -13,18 +10,46 @@ namespace Infrastructure.Repository
         private readonly ApplicationDbContext _context;
         public PasswordResetTokenRepository(ApplicationDbContext context) => _context = context;
 
-        public async Task AddAsync(PasswordResetToken token) => await _context.PasswordResetTokens.AddAsync(token);
+        public async Task AddAsync(
+            PasswordResetToken token,
+            CancellationToken cancellationToken = default) =>
+            await _context.PasswordResetTokens.AddAsync(token, cancellationToken);
 
-        public async Task<PasswordResetToken?> GetByTokenAsync(string email, string token)
-            => await _context.PasswordResetTokens.FirstOrDefaultAsync(t => t.Email == email && t.Token == token);
+        public async Task<PasswordResetToken?> GetByTokenHashAsync(
+            string email,
+            string tokenHash,
+            CancellationToken cancellationToken = default)
+        {
+            string normalizedEmail = email.Trim().ToLowerInvariant();
+            return await _context.PasswordResetTokens.FirstOrDefaultAsync(
+                x => x.Email == normalizedEmail && x.Token == tokenHash,
+                cancellationToken);
+        }
 
-        public async Task<IEnumerable<PasswordResetToken>> GetByEmailAsync(string email)
-            => await _context.PasswordResetTokens.Where(t => t.Email == email).ToListAsync();
+        public async Task<IReadOnlyList<PasswordResetToken>> GetByEmailAsync(
+            string email,
+            CancellationToken cancellationToken = default)
+        {
+            string normalizedEmail = email.Trim().ToLowerInvariant();
+            return await _context.PasswordResetTokens
+                .Where(x => x.Email == normalizedEmail)
+                .ToListAsync(cancellationToken);
+        }
 
-        public async Task RemoveRangeAsync(IEnumerable<PasswordResetToken> tokens)
-            => _context.PasswordResetTokens.RemoveRange(tokens);
+        public Task RemoveRangeAsync(
+            IEnumerable<PasswordResetToken> tokens,
+            CancellationToken cancellationToken = default)
+        {
+            _context.PasswordResetTokens.RemoveRange(tokens);
+            return Task.CompletedTask;
+        }
 
-        public async Task DeleteAsync(PasswordResetToken token)
-            => _context.PasswordResetTokens.Remove(token);
+        public Task DeleteAsync(
+            PasswordResetToken token,
+            CancellationToken cancellationToken = default)
+        {
+            _context.PasswordResetTokens.Remove(token);
+            return Task.CompletedTask;
+        }
     }
 }

@@ -12,16 +12,25 @@ namespace Application.AutoMapper
     {
         public MappingProfile()
         {
-            //map user sang authresponsedto
             CreateMap<User, AuthResponseDTO>();
-            //map user sang userDTO
-            CreateMap<User, UserDTO>();
-    //        //map booking entoty sang bookingresponse
-    //        CreateMap<Booking, BookingResponse>()
-    //.ForMember(dest => dest.Status, opt => opt.MapFrom(src => src.Status.ToString()))
-    //.ForMember(dest => dest.Lab, opt => opt.MapFrom(src => src.BookingItems.Select(x => x.LabRoom.LabName).ToList()))
-    //.ForMember(dest => dest.EquipmentNames, opt => opt.MapFrom(src => src.BookingItems.Select(x => x.Equipment.EquipmentName).ToList()));
 
+            CreateMap<User, UserDTO>()
+                .ForMember(
+                    destination =>
+                        destination.RoleName,
+                    option => option.MapFrom(
+                        source =>
+                            source.Role != null
+                                ? source.Role.RoleName.ToString()
+                                : string.Empty))
+                .ForMember(
+                    destination =>
+                        destination.DepartmentName,
+                    option => option.MapFrom(
+                        source =>
+                            source.Department != null
+                                ? source.Department.DepartmentName
+                                : string.Empty));
         }
     }
 }

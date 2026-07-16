@@ -1,14 +1,11 @@
 ﻿using Application.DTOs.Auth;
 using Application.Interfaces;
 using AutoMapper;
-using BCrypt.Net;
 using Domain;
 using Domain.Entities;
 using Domain.Interfaces;
-using Microsoft.AspNetCore.Identity.Data;
-using System;
-using System.Collections.Generic;
-using System.Runtime.Intrinsics.X86;
+using Microsoft.Extensions.Configuration;
+using System.Security.Cryptography;
 using System.Text;
 
 namespace Application.Services
@@ -23,156 +20,271 @@ namespace Application.Services
         private readonly ICurrentUserService _currentUserService;
         private readonly IPasswordResetTokenRepository _passwordResetTokenRepository;
         private readonly IEmailService _emailService;
-        public UserService(IUserRepository userRepository, IJwtService jwtService, IRefreshTokenRepository refreshTokenRopository, IUnitOfWork unitOfWork, IMapper iMapper, ICurrentUserService currentUserService, IPasswordResetTokenRepository passwordResetTokenRepository, IEmailService emailService)
+        private readonly IAuditLogWriter _auditLogWriter;
+        private readonly IConfiguration _configuration;
+
+        public UserService(
+            IUserRepository userRepository,
+            IJwtService jwtService,
+            IRefreshTokenRepository refreshTokenRepository,
+            IUnitOfWork unitOfWork,
+            IMapper mapper,
+            ICurrentUserService currentUserService,
+            IPasswordResetTokenRepository passwordResetTokenRepository,
+            IEmailService emailService,
+            IAuditLogWriter auditLogWriter,
+            IConfiguration configuration)
         {
             _userRepository = userRepository;
             _jwtService = jwtService;
-            _refreshTokenRepository = refreshTokenRopository;
+            _refreshTokenRepository = refreshTokenRepository;
             _unitOfWork = unitOfWork;
-            _mapper = iMapper;
+            _mapper = mapper;
             _currentUserService = currentUserService;
             _passwordResetTokenRepository = passwordResetTokenRepository;
             _emailService = emailService;
+            _auditLogWriter = auditLogWriter;
+            _configuration = configuration;
         }
 
-        public async Task<UserDTO> GetUserByIdServiceAsync(CancellationToken cancelation)
+        public async Task<UserDTO?> GetUserByIdServiceAsync(
+            CancellationToken cancellationToken)
         {
-            var currentUserId = _currentUserService.UserId;
-            if (currentUserId == null) return null;
+            int? currentUserId = _currentUserService.UserId;
+            if (!currentUserId.HasValue) return null;
 
-            var user = await _userRepository.GetByIdAsync(currentUserId.Value, cancelation);
-            if (user == null) return null;
-            var newUser = _mapper.Map<UserDTO>(user);
-            return newUser;
-        }
+            var user = await _userRepository.GetUserByIdAsync(
+                currentUserId.Value,
+                cancellationToken);
+            if (user is null) return null;
 
-        public async Task<AuthResponseDTO> RefreshTokenAsync(RefreshTokenRequest refreshTokenRequest, CancellationToken cancelationToken = default)
-        {
-            var storedToken = await _refreshTokenRepository.GetByTokenAsync(refreshTokenRequest.RefreshToken, cancelationToken);
-            if (storedToken == null)
+            if (user.TryUnlockExpiredRestriction(DateTime.UtcNow))
             {
-                return null;
+                _userRepository.Update(user);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
             }
-            if (storedToken.ExpiresAt < DateTime.UtcNow)
+            return _mapper.Map<UserDTO>(user);
+        }
+
+        public async Task<AuthResponseDTO?> RefreshTokenAsync(
+            RefreshTokenRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+            if (string.IsNullOrWhiteSpace(request.RefreshToken)) return null;
+
+            var storedToken = await _refreshTokenRepository.GetByTokenAsync(
+                request.RefreshToken,
+                cancellationToken);
+            if (storedToken is null) return null;
+
+            if (!storedToken.IsActive)
             {
-                var allToken = await _refreshTokenRepository.GetActiveByUserIdAsync(storedToken.UserId, cancelationToken);
-                foreach (var token in allToken)
+                if (storedToken.ExpiresAt <= DateTime.UtcNow
+                    && storedToken.Status == RefreshTokenStatus.Active)
                 {
-                    token.Revoke();
+                    storedToken.MarkExpired();
+                    await _unitOfWork.SaveChangesAsync(cancellationToken);
                 }
-                await _unitOfWork.SaveChangesAsync();
                 return null;
             }
-            var user = await _userRepository.GetUserByIdAsync(storedToken.UserId, cancelationToken);
-            if (user == null || user.Status != UserStatus.Active)
+
+            var user = await _userRepository.GetUserByIdAsync(
+                storedToken.UserId,
+                cancellationToken);
+            if (user is null) return null;
+            user.TryUnlockExpiredRestriction(DateTime.UtcNow);
+
+            if (user.Status is UserStatus.Inactive or UserStatus.Locked)
             {
+                await _refreshTokenRepository.RevokeAllByUserIdAsync(
+                    user.UserId,
+                    cancellationToken);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
                 return null;
             }
-            var newAccessToken = _jwtService.GenerateAccessToken(user);
-            var newRefreshToken = _jwtService.GenerateRefreshToken();
+
+            string accessToken = _jwtService.GenerateAccessToken(user);
+            string refreshToken = _jwtService.GenerateRefreshToken();
             storedToken.Revoke();
-            var newTokenEntity = new RefreshToken(
-                user.UserId,
-                newRefreshToken,
-                DateTime.UtcNow.AddDays(7)
-            );
-            await _refreshTokenRepository.AddRefreshTokenAsync(newTokenEntity);
-            await _unitOfWork.SaveChangesAsync(cancelationToken);
+            await _refreshTokenRepository.AddRefreshTokenAsync(
+                new RefreshToken(user.UserId, refreshToken, DateTime.UtcNow.AddDays(7)));
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+
             return new AuthResponseDTO
             {
-                AccessToken = newAccessToken,
-                RefreshToken = newRefreshToken
+                AccessToken = accessToken,
+                RefreshToken = refreshToken
             };
         }
 
-        
-
-        public async Task<UserDTO> CreateUserAsync(CreateUserDTO createUserDTO, CancellationToken cancelation)
+        public async Task<UserDTO> CreateUserAsync(
+            CreateUserDTO request,
+            CancellationToken cancellationToken)
         {
-            var existUser = await _userRepository.IsUsernameExistsAsync(createUserDTO.Username);
-            if (existUser) throw new InvalidOperationException("UserNawe exist in system");
-            var existEmail = await _userRepository.IsEmailExistsAsync(createUserDTO.Email);
-            if (existEmail) throw new InvalidOperationException("Email exist in system");
-            var hash = BCrypt.Net.BCrypt.HashPassword(createUserDTO.Password);
+            ArgumentNullException.ThrowIfNull(request);
+            ValidateNewUserRequest(request);
+            int actorId = _currentUserService.GetRequiredUserId();
+            var actor = await _userRepository.GetUserByIdAsync(actorId, cancellationToken)
+                ?? throw new KeyNotFoundException($"Không tìm thấy Admin có ID {actorId}.");
+            if (actor.Status != UserStatus.Active || actor.Role?.RoleName != RoleName.Admin)
+                throw new UnauthorizedAccessException("Chỉ Admin Active được tạo người dùng.");
 
-            var roleId = (int)createUserDTO.Role;
-            var newUser = new User
-                (
-                    roleId: roleId,
-                    departmentId: createUserDTO.DepartmentId,
-                    fullName: createUserDTO.FullName,
-                    username: createUserDTO.Username,
-                    email: createUserDTO.Email,
-                    passwordHash: hash
-                );
+            var role = await _unitOfWork.Roles.GetByIdAsync((int)request.Role, cancellationToken)
+                ?? throw new KeyNotFoundException($"Không tìm thấy role {request.Role}.");
+            if (role.RoleName != request.Role)
+                throw new InvalidOperationException("RoleId và RoleName không khớp.");
 
-            await _userRepository.AddUserAsync(newUser);
-            await _unitOfWork.SaveChangesAsync();
+            var department = await _unitOfWork.Departments.GetByIdAsync(
+                request.DepartmentId,
+                cancellationToken)
+                ?? throw new KeyNotFoundException(
+                    $"Không tìm thấy khoa/phòng ban có ID {request.DepartmentId}.");
+            if (department.Status != DepartmentStatus.Active)
+                throw new InvalidOperationException(
+                    "Không thể tạo user trong khoa/phòng ban đã ngừng sử dụng.");
 
-            return _mapper.Map<UserDTO>(newUser);
+            if (await _userRepository.IsUsernameExistsAsync(
+                    request.Username,
+                    cancellationToken: cancellationToken))
+                throw new InvalidOperationException("Username đã tồn tại trong hệ thống.");
+            if (await _userRepository.IsEmailExistsAsync(
+                    request.Email,
+                    cancellationToken: cancellationToken))
+                throw new InvalidOperationException("Email đã tồn tại trong hệ thống.");
+
+            var user = new User(
+                (int)request.Role,
+                request.DepartmentId,
+                request.FullName,
+                request.Username,
+                request.Email,
+                BCrypt.Net.BCrypt.HashPassword(request.Password));
+
+            await _unitOfWork.ExecuteInTransactionAsync(async ct =>
+            {
+                await _userRepository.AddUserAsync(user, ct);
+                await _unitOfWork.SaveChangesAsync(ct);
+                await _auditLogWriter.WriteAsync(
+                    actor.UserId,
+                    AuditActionType.Create,
+                    nameof(User),
+                    user.UserId,
+                    null,
+                    new
+                    {
+                        user.UserId,
+                        user.FullName,
+                        user.Username,
+                        user.Email,
+                        user.RoleId,
+                        user.DepartmentId,
+                        Status = user.Status.ToString()
+                    },
+                    ct);
+                await _unitOfWork.SaveChangesAsync(ct);
+            }, cancellationToken);
+
+            return _mapper.Map<UserDTO>(user);
         }
 
-        public async Task<bool> ForgotPasswordAsync(string email, CancellationToken cancelation = default)
+        public async Task<bool> ForgotPasswordAsync(
+            string email,
+            CancellationToken cancellationToken = default)
         {
-            var user = await _userRepository.GetByEmailAsync(email);
-            if (user == null)
-            {
+            if (string.IsNullOrWhiteSpace(email)) return true;
+            string normalizedEmail = email.Trim().ToLowerInvariant();
+            var user = await _userRepository.GetByEmailAsync(normalizedEmail, cancellationToken);
+            if (user is null) return true;
+
+            var oldTokens = await _passwordResetTokenRepository.GetByEmailAsync(
+                normalizedEmail,
+                cancellationToken);
+            if (oldTokens.Count > 0)
+                await _passwordResetTokenRepository.RemoveRangeAsync(oldTokens, cancellationToken);
+
+            string rawToken = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+            string tokenHash = HashToken(rawToken);
+            await _passwordResetTokenRepository.AddAsync(
+                new PasswordResetToken(
+                    normalizedEmail,
+                    tokenHash,
+                    DateTime.UtcNow.AddHours(1)),
+                cancellationToken);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+            string frontendUrl = _configuration["PasswordReset:FrontendUrl"]
+                ?? "https://localhost:4200";
+            string resetLink = $"{frontendUrl.TrimEnd('/')}/reset-password?token="
+                + $"{Uri.EscapeDataString(rawToken)}&email={Uri.EscapeDataString(normalizedEmail)}";
+            string emailBody = $"<h2>Yêu cầu đặt lại mật khẩu</h2>"
+                + $"<p>Tài khoản: <b>{normalizedEmail}</b></p>"
+                + $"<p><a href='{resetLink}'>Đặt lại mật khẩu</a></p>"
+                + "<p>Liên kết hết hạn sau 1 giờ.</p>";
+            await _emailService.SendEmailAsync(normalizedEmail, "Reset password", emailBody);
+            return true;
+        }
+
+        public async Task<bool> ResetPasswordAsync(
+            ResetPasswordRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+            if (string.IsNullOrWhiteSpace(request.Email)
+                || string.IsNullOrWhiteSpace(request.Token))
                 return false;
-            }
-            var oldToken = await _passwordResetTokenRepository.GetByEmailAsync(email);
-            if (oldToken.Any())
-            {
-                await _passwordResetTokenRepository.RemoveRangeAsync(oldToken);
-            }
-            // Generate a password reset token
-            var token = Guid.NewGuid().ToString();
-            var expiryDate = DateTime.UtcNow.AddHours(1);
-            var passwordResetToken = new PasswordResetToken
-            {
-                Email = email,
-                Token = token,
-                ExpiryDate = expiryDate
-            };
-            await _passwordResetTokenRepository.AddAsync(passwordResetToken);
-            await _unitOfWork.SaveChangesAsync();
+            ValidatePassword(request.NewPassword);
 
-            string frontendUrl = "https://localhost:4200";
-            string encodedToken = Uri.EscapeDataString(token);
-            string encodedEmail = Uri.EscapeDataString(email);
-            string resetLink = $"{frontendUrl}/reset-password?token={encodedToken}&email={encodedEmail}";
-            string emailBody = $@"
-        <h2>Yêu cầu đặt lại mật khẩu</h2>
-        <p>Chào sếp,</p>
-        <p>Chúng tôi đã nhận được yêu cầu đặt lại mật khẩu cho tài khoản: <b>{email}</b></p>
-        <p>Vui lòng nhấp vào liên kết dưới đây để thiết lập mật khẩu mới:</p>
-        <a href='{resetLink}'>Đặt lại mật khẩu</a>
-        <p>Liên kết này sẽ hết hạn sau 1 giờ.</p>";
-            await _emailService.SendEmailAsync(email, "Reset password", emailBody);
-            Console.WriteLine($"Token of {email} is {token}");
+            string normalizedEmail = request.Email.Trim().ToLowerInvariant();
+            string tokenHash = HashToken(request.Token);
+            var tokenRecord = await _passwordResetTokenRepository.GetByTokenHashAsync(
+                normalizedEmail,
+                tokenHash,
+                cancellationToken);
+            if (tokenRecord is null || tokenRecord.IsExpired(DateTime.UtcNow))
+                return false;
+
+            var user = await _userRepository.GetByEmailAsync(normalizedEmail, cancellationToken);
+            if (user is null) return false;
+
+            await _unitOfWork.ExecuteInTransactionAsync(async ct =>
+            {
+                user.SetPassword(BCrypt.Net.BCrypt.HashPassword(request.NewPassword));
+                _userRepository.Update(user);
+                await _passwordResetTokenRepository.DeleteAsync(tokenRecord, ct);
+                await _refreshTokenRepository.RevokeAllByUserIdAsync(user.UserId, ct);
+                await _unitOfWork.SaveChangesAsync(ct);
+            }, cancellationToken);
             return true;
         }
-        public async Task<bool> ResetPasswordAsync(DTOs.Auth.ResetPasswordRequest request, CancellationToken cancellation)
+
+        private static string HashToken(string token) =>
+            Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token.Trim())));
+
+        private static void ValidateNewUserRequest(CreateUserDTO request)
         {
-            // 1. Tìm token
-            var tokenRecord = await _passwordResetTokenRepository.GetByTokenAsync(request.Email, request.Token);
-            if (tokenRecord == null || tokenRecord.ExpiryDate < DateTime.UtcNow) return false;
+            if (string.IsNullOrWhiteSpace(request.FullName))
+                throw new ArgumentException("Họ tên không được để trống.");
+            if (string.IsNullOrWhiteSpace(request.Username))
+                throw new ArgumentException("Username không được để trống.");
+            if (string.IsNullOrWhiteSpace(request.Email))
+                throw new ArgumentException("Email không được để trống.");
+            if (!Enum.IsDefined(request.Role))
+                throw new ArgumentException("Role không hợp lệ.");
+            if (request.DepartmentId <= 0)
+                throw new ArgumentException("DepartmentId phải lớn hơn 0.");
+            ValidatePassword(request.Password);
+        }
 
-            // 2. Tìm user
-            var user = await _userRepository.GetByEmailAsync(request.Email);
-            if (user == null) return false;
-
-            // 3. Update mật khẩu (Gán trực tiếp hoặc dùng phương thức Domain)
-            user.SetPassword(BCrypt.Net.BCrypt.HashPassword(request.newPassword));
-
-            // 4. Hủy refresh token cũ
-            await _refreshTokenRepository.RevokeAllByUserIdAsync(user.UserId);
-
-            // 4. Xóa token
-            await _passwordResetTokenRepository.DeleteAsync(tokenRecord);
-
-            // 5. Lưu
-            await _unitOfWork.SaveChangesAsync();
-            return true;
+        private static void ValidatePassword(string password)
+        {
+            if (string.IsNullOrWhiteSpace(password) || password.Length < 8)
+                throw new ArgumentException("Mật khẩu phải có ít nhất 8 ký tự.");
+            if (!password.Any(char.IsUpper)
+                || !password.Any(char.IsLower)
+                || !password.Any(char.IsDigit))
+                throw new ArgumentException(
+                    "Mật khẩu phải có chữ hoa, chữ thường và chữ số.");
         }
     }
 }

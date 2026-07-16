@@ -62,6 +62,9 @@ namespace Infrastructure.AppDbContext
         // It does NOT create the SQL trigger in database.
         public async Task EnsureDatabaseGuardsCreatedAsync(CancellationToken cancellationToken = default)
         {
+            await Database.ExecuteSqlRawAsync(CreateOpenUsageLogUniqueIndexSql, cancellationToken);
+            await Database.ExecuteSqlRawAsync(CreateActiveViolationUniqueIndexSql, cancellationToken);
+            await Database.ExecuteSqlRawAsync(CreateActiveWaitlistUniqueIndexesSql, cancellationToken);
             await Database.ExecuteSqlRawAsync(CreateOrAlterBookingItemsPreventConflictTriggerSql, cancellationToken);
             await Database.ExecuteSqlRawAsync(CreateOrAlterBookingsPreventConflictTriggerSql, cancellationToken);
             await Database.ExecuteSqlRawAsync(CreateOrAlterMaintenancesPreventConflictTriggerSql, cancellationToken);
@@ -125,7 +128,6 @@ namespace Infrastructure.AppDbContext
 
             var activeBookingStatuses = new[]
             {
-                BookingStatus.Pending,
                 BookingStatus.Approved
             };
 
@@ -135,15 +137,29 @@ namespace Infrastructure.AppDbContext
                 MaintenanceStatus.InProgress
             };
 
+            int? equipmentLabId = null;
+            if (equipmentId.HasValue)
+            {
+                equipmentLabId = await Equipments
+                    .Where(x => x.EquipmentId == equipmentId.Value)
+                    .Select(x => (int?)x.LabId)
+                    .FirstOrDefaultAsync(cancellationToken);
+            }
+
             var bookingConflict = await BookingItems.AnyAsync(x =>
-                x.Booking != null &&
-                activeBookingStatuses.Contains(x.Booking.Status) &&
-                x.Booking.StartTime < endTime &&
-                x.Booking.EndTime > startTime &&
-                (!excludedBookingId.HasValue || x.BookingId != excludedBookingId.Value) &&
-                (
-                    (labId.HasValue && x.LabId == labId.Value) ||
-                    (equipmentId.HasValue && x.EquipmentId == equipmentId.Value)
+                x.Booking != null
+                && activeBookingStatuses.Contains(x.Booking.Status)
+                && x.Booking.StartTime < endTime
+                && x.Booking.EndTime > startTime
+                && (!excludedBookingId.HasValue || x.BookingId != excludedBookingId.Value)
+                && (
+                    (labId.HasValue
+                        && (x.LabId == labId.Value
+                            || (x.Equipment != null && x.Equipment.LabId == labId.Value)))
+                    ||
+                    (equipmentId.HasValue
+                        && (x.EquipmentId == equipmentId.Value
+                            || (equipmentLabId.HasValue && x.LabId == equipmentLabId.Value)))
                 ),
                 cancellationToken);
 
@@ -156,7 +172,9 @@ namespace Infrastructure.AppDbContext
                 x.EndTime > startTime &&
                 (
                     (labId.HasValue && x.LabId == labId.Value) ||
-                    (equipmentId.HasValue && x.EquipmentId == equipmentId.Value)
+                    (equipmentId.HasValue &&
+                        (x.EquipmentId == equipmentId.Value ||
+                         (equipmentLabId.HasValue && x.LabId == equipmentLabId.Value)))
                 ),
                 cancellationToken);
 
@@ -350,6 +368,9 @@ namespace Infrastructure.AppDbContext
 
                 entity.Property(x => x.Capacity)
                     .IsRequired();
+
+                entity.Property(x => x.Description)
+                    .HasMaxLength(1000);
 
                 entity.Property(x => x.ImageUrl)
                     .HasMaxLength(500);
@@ -598,6 +619,11 @@ namespace Infrastructure.AppDbContext
                 entity.Property(x => x.IncidentDescription)
                     .HasColumnType("nvarchar(max)");
 
+                entity.HasIndex(x => x.BookingItemId)
+                    .IsUnique()
+                    .HasFilter("[ActualCheckout] IS NULL")
+                    .HasDatabaseName("UX_UsageLogs_OneOpenPerBookingItem");
+
                 entity.HasOne(x => x.BookingItem)
                     .WithMany(x => x.UsageLogs)
                     .HasForeignKey(x => x.BookingItemId)
@@ -647,6 +673,14 @@ namespace Infrastructure.AppDbContext
                 entity.Property(x => x.Status)
                     .HasConversion<string>()
                     .HasMaxLength(30)
+                    .IsRequired();
+
+                entity.Property(x => x.RecurrenceType)
+                    .HasConversion<string>()
+                    .HasMaxLength(30)
+                    .IsRequired();
+
+                entity.Property(x => x.RecurrenceInterval)
                     .IsRequired();
 
                 entity.HasIndex(x => new { x.LabId, x.StartTime, x.EndTime });
@@ -764,6 +798,16 @@ namespace Infrastructure.AppDbContext
                     .HasConversion<string>()
                     .HasMaxLength(30)
                     .IsRequired();
+
+                entity.HasIndex(x => new
+                {
+                    x.UserId,
+                    x.BookingId,
+                    x.ViolationType
+                })
+                    .IsUnique()
+                    .HasFilter("[Status] = 'Active'")
+                    .HasDatabaseName("UX_Violations_OneActivePerBookingType");
 
                 entity.HasOne(x => x.User)
                     .WithMany(x => x.Violations)
@@ -989,6 +1033,64 @@ namespace Infrastructure.AppDbContext
             );
         }
 
+        private const string CreateOpenUsageLogUniqueIndexSql = """
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE [name] = 'UX_UsageLogs_OneOpenPerBookingItem'
+      AND [object_id] = OBJECT_ID(N'[UsageLogs]')
+)
+BEGIN
+    CREATE UNIQUE INDEX [UX_UsageLogs_OneOpenPerBookingItem]
+        ON [UsageLogs] ([BookingItemId])
+        WHERE [ActualCheckout] IS NULL;
+END
+""";
+
+        private const string CreateActiveViolationUniqueIndexSql = """
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE [name] = 'UX_Violations_OneActivePerBookingType'
+      AND [object_id] = OBJECT_ID(N'[Violations]')
+)
+BEGIN
+    CREATE UNIQUE INDEX [UX_Violations_OneActivePerBookingType]
+        ON [Violations] ([UserId], [BookingId], [ViolationType])
+        WHERE [Status] = 'Active';
+END
+""";
+
+        private const string CreateActiveWaitlistUniqueIndexesSql = """
+IF NOT EXISTS
+(
+    SELECT 1 FROM sys.indexes
+    WHERE [name] = 'UX_Waitlists_ActiveUserResourceSlot'
+      AND [object_id] = OBJECT_ID(N'[Waitlists]')
+)
+BEGIN
+    CREATE UNIQUE INDEX [UX_Waitlists_ActiveUserResourceSlot]
+        ON [Waitlists]
+        ([UserId], [LabId], [EquipmentId], [RequestedStart], [RequestedEnd])
+        WHERE [Status] IN ('Waiting', 'Notified');
+END;
+
+IF NOT EXISTS
+(
+    SELECT 1 FROM sys.indexes
+    WHERE [name] = 'UX_Waitlists_ActiveQueuePosition'
+      AND [object_id] = OBJECT_ID(N'[Waitlists]')
+)
+BEGIN
+    CREATE UNIQUE INDEX [UX_Waitlists_ActiveQueuePosition]
+        ON [Waitlists]
+        ([LabId], [EquipmentId], [RequestedStart], [RequestedEnd], [QueuePosition])
+        WHERE [Status] IN ('Waiting', 'Notified');
+END;
+""";
+
         private const string CreateOrAlterBookingItemsPreventConflictTriggerSql = """
 CREATE OR ALTER TRIGGER [TRG_BookingItems_PreventConflict]
 ON [BookingItems]
@@ -997,40 +1099,61 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
+    -- Pending requests may share a slot, but an existing Approved booking locks the resource.
     IF EXISTS
     (
         SELECT 1
         FROM inserted i
-        INNER JOIN [Bookings] b ON b.[BookingId] = i.[BookingId]
+        INNER JOIN [Bookings] b
+            ON b.[BookingId] = i.[BookingId]
+        LEFT JOIN [Equipments] insertedEquipment
+            ON insertedEquipment.[EquipmentId] = i.[EquipmentId]
         INNER JOIN [BookingItems] otherItem
             ON otherItem.[BookingItemId] <> i.[BookingItemId]
+        LEFT JOIN [Equipments] otherEquipment
+            ON otherEquipment.[EquipmentId] = otherItem.[EquipmentId]
         INNER JOIN [Bookings] otherBooking
             ON otherBooking.[BookingId] = otherItem.[BookingId]
         WHERE b.[Status] IN ('Pending', 'Approved')
-          AND otherBooking.[Status] IN ('Pending', 'Approved')
+          AND otherBooking.[Status] = 'Approved'
+          AND b.[BookingId] <> otherBooking.[BookingId]
           AND b.[StartTime] < otherBooking.[EndTime]
           AND b.[EndTime] > otherBooking.[StartTime]
           AND
           (
               (i.[LabId] IS NOT NULL AND otherItem.[LabId] = i.[LabId])
               OR
-              (i.[EquipmentId] IS NOT NULL AND otherItem.[EquipmentId] = i.[EquipmentId])
+              (i.[EquipmentId] IS NOT NULL
+               AND otherItem.[EquipmentId] = i.[EquipmentId])
+              OR
+              (i.[LabId] IS NOT NULL
+               AND otherEquipment.[LabId] = i.[LabId])
+              OR
+              (insertedEquipment.[LabId] IS NOT NULL
+               AND otherItem.[LabId] = insertedEquipment.[LabId])
           )
     )
     BEGIN
-        THROW 50001, 'Booking schedule overlaps with an existing booking.', 1;
+        THROW 50001, 'Booking schedule overlaps with an existing approved booking.', 1;
     END;
 
     IF EXISTS
     (
         SELECT 1
         FROM inserted i
-        INNER JOIN [Bookings] b ON b.[BookingId] = i.[BookingId]
+        INNER JOIN [Bookings] b
+            ON b.[BookingId] = i.[BookingId]
+        LEFT JOIN [Equipments] itemEquipment
+            ON itemEquipment.[EquipmentId] = i.[EquipmentId]
         INNER JOIN [Maintenances] m ON
         (
             (i.[LabId] IS NOT NULL AND m.[LabId] = i.[LabId])
             OR
-            (i.[EquipmentId] IS NOT NULL AND m.[EquipmentId] = i.[EquipmentId])
+            (i.[EquipmentId] IS NOT NULL
+             AND m.[EquipmentId] = i.[EquipmentId])
+            OR
+            (i.[EquipmentId] IS NOT NULL
+             AND m.[LabId] = itemEquipment.[LabId])
         )
         WHERE b.[Status] IN ('Pending', 'Approved')
           AND m.[Status] IN ('Scheduled', 'InProgress')
@@ -1051,30 +1174,43 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
+    -- Approval is the point at which a booking locks a resource.
     IF EXISTS
     (
         SELECT 1
         FROM inserted b
         INNER JOIN [BookingItems] item
             ON item.[BookingId] = b.[BookingId]
+        LEFT JOIN [Equipments] itemEquipmentForConflict
+            ON itemEquipmentForConflict.[EquipmentId] = item.[EquipmentId]
         INNER JOIN [BookingItems] otherItem
             ON otherItem.[BookingItemId] <> item.[BookingItemId]
+        LEFT JOIN [Equipments] otherEquipmentForConflict
+            ON otherEquipmentForConflict.[EquipmentId] = otherItem.[EquipmentId]
         INNER JOIN [Bookings] otherBooking
             ON otherBooking.[BookingId] = otherItem.[BookingId]
         WHERE b.[Status] IN ('Pending', 'Approved')
-          AND otherBooking.[Status] IN ('Pending', 'Approved')
+          AND otherBooking.[Status] = 'Approved'
           AND otherBooking.[BookingId] <> b.[BookingId]
           AND b.[StartTime] < otherBooking.[EndTime]
           AND b.[EndTime] > otherBooking.[StartTime]
           AND
           (
-              (item.[LabId] IS NOT NULL AND otherItem.[LabId] = item.[LabId])
+              (item.[LabId] IS NOT NULL
+               AND otherItem.[LabId] = item.[LabId])
               OR
-              (item.[EquipmentId] IS NOT NULL AND otherItem.[EquipmentId] = item.[EquipmentId])
+              (item.[EquipmentId] IS NOT NULL
+               AND otherItem.[EquipmentId] = item.[EquipmentId])
+              OR
+              (item.[LabId] IS NOT NULL
+               AND otherEquipmentForConflict.[LabId] = item.[LabId])
+              OR
+              (itemEquipmentForConflict.[LabId] IS NOT NULL
+               AND otherItem.[LabId] = itemEquipmentForConflict.[LabId])
           )
     )
     BEGIN
-        THROW 50003, 'Booking schedule overlaps with an existing booking.', 1;
+        THROW 50003, 'Booking schedule overlaps with an existing approved booking.', 1;
     END;
 
     IF EXISTS
@@ -1083,11 +1219,17 @@ BEGIN
         FROM inserted b
         INNER JOIN [BookingItems] item
             ON item.[BookingId] = b.[BookingId]
+        LEFT JOIN [Equipments] itemEquipment
+            ON itemEquipment.[EquipmentId] = item.[EquipmentId]
         INNER JOIN [Maintenances] m ON
         (
             (item.[LabId] IS NOT NULL AND m.[LabId] = item.[LabId])
             OR
-            (item.[EquipmentId] IS NOT NULL AND m.[EquipmentId] = item.[EquipmentId])
+            (item.[EquipmentId] IS NOT NULL
+             AND m.[EquipmentId] = item.[EquipmentId])
+            OR
+            (item.[EquipmentId] IS NOT NULL
+             AND m.[LabId] = itemEquipment.[LabId])
         )
         WHERE b.[Status] IN ('Pending', 'Approved')
           AND m.[Status] IN ('Scheduled', 'InProgress')
@@ -1112,39 +1254,57 @@ BEGIN
     (
         SELECT 1
         FROM inserted m
-        INNER JOIN [BookingItems] item ON
-        (
-            (m.[LabId] IS NOT NULL AND item.[LabId] = m.[LabId])
-            OR
-            (m.[EquipmentId] IS NOT NULL AND item.[EquipmentId] = m.[EquipmentId])
-        )
+        INNER JOIN [BookingItems] item ON 1 = 1
+        LEFT JOIN [Equipments] itemEquipment
+            ON itemEquipment.[EquipmentId] = item.[EquipmentId]
         INNER JOIN [Bookings] b
             ON b.[BookingId] = item.[BookingId]
         WHERE m.[Status] IN ('Scheduled', 'InProgress')
-          AND b.[Status] IN ('Pending', 'Approved')
+          AND b.[Status] = 'Approved'
           AND m.[StartTime] < b.[EndTime]
           AND m.[EndTime] > b.[StartTime]
+          AND
+          (
+              (m.[LabId] IS NOT NULL
+               AND (item.[LabId] = m.[LabId]
+                    OR itemEquipment.[LabId] = m.[LabId]))
+              OR
+              (m.[EquipmentId] IS NOT NULL
+               AND item.[EquipmentId] = m.[EquipmentId])
+          )
     )
     BEGIN
-        THROW 50005, 'Maintenance schedule overlaps with an existing booking.', 1;
+        THROW 50005, 'Maintenance schedule overlaps with an existing approved booking.', 1;
     END;
 
     IF EXISTS
     (
         SELECT 1
         FROM inserted m
-        INNER JOIN [Maintenances] otherMaintenance ON
-            otherMaintenance.[MaintenanceId] <> m.[MaintenanceId]
-            AND
-            (
-                (m.[LabId] IS NOT NULL AND otherMaintenance.[LabId] = m.[LabId])
-                OR
-                (m.[EquipmentId] IS NOT NULL AND otherMaintenance.[EquipmentId] = m.[EquipmentId])
-            )
+        LEFT JOIN [Equipments] insertedEquipment
+            ON insertedEquipment.[EquipmentId] = m.[EquipmentId]
+        INNER JOIN [Maintenances] otherMaintenance
+            ON otherMaintenance.[MaintenanceId] <> m.[MaintenanceId]
+        LEFT JOIN [Equipments] otherEquipment
+            ON otherEquipment.[EquipmentId] = otherMaintenance.[EquipmentId]
         WHERE m.[Status] IN ('Scheduled', 'InProgress')
           AND otherMaintenance.[Status] IN ('Scheduled', 'InProgress')
           AND m.[StartTime] < otherMaintenance.[EndTime]
           AND m.[EndTime] > otherMaintenance.[StartTime]
+          AND
+          (
+              (m.[LabId] IS NOT NULL
+               AND otherMaintenance.[LabId] = m.[LabId])
+              OR
+              (m.[EquipmentId] IS NOT NULL
+               AND otherMaintenance.[EquipmentId] = m.[EquipmentId])
+              OR
+              (m.[LabId] IS NOT NULL
+               AND otherEquipment.[LabId] = m.[LabId])
+              OR
+              (m.[EquipmentId] IS NOT NULL
+               AND otherMaintenance.[LabId] = insertedEquipment.[LabId])
+          )
     )
     BEGIN
         THROW 50006, 'Maintenance schedule overlaps with an existing maintenance schedule.', 1;

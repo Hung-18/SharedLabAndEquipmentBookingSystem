@@ -10,19 +10,47 @@ namespace Application.Services
     public class CurrentUserService : ICurrentUserService
     {
         private readonly IHttpContextAccessor _contextAccessor;
-        public CurrentUserService(IHttpContextAccessor contextAccesor)
+
+        public CurrentUserService(
+            IHttpContextAccessor contextAccessor)
         {
-            _contextAccessor = contextAccesor;
+            _contextAccessor = contextAccessor;
         }
 
         public int? UserId
         {
             get
             {
-                var id = _contextAccessor.HttpContext?.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? _contextAccessor.HttpContext?.User?.FindFirstValue("UserId");
-                if (string.IsNullOrEmpty(id)) return null;
-                return int.TryParse(id, out var userId) ? userId : null;
+                var principal =
+                    _contextAccessor.HttpContext?.User;
+
+                if (principal?.Identity?.IsAuthenticated != true)
+                {
+                    return null;
+                }
+
+                var userIdText =
+                    principal.FindFirstValue(
+                        ClaimTypes.NameIdentifier);
+
+                if (string.IsNullOrWhiteSpace(userIdText))
+                {
+                    return null;
+                }
+
+                return int.TryParse(
+                    userIdText,
+                    out var userId)
+                        ? userId
+                        : null;
             }
+        }
+
+        public int GetRequiredUserId()
+        {
+            return UserId
+                ?? throw new UnauthorizedAccessException(
+                    "Không xác định được người dùng từ access token.");
         }
     }
 }

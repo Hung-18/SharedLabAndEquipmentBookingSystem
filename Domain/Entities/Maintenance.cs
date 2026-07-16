@@ -52,6 +52,17 @@
         public MaintenanceStatus Status { get; private set; }
             = MaintenanceStatus.Scheduled;
 
+        public MaintenanceRecurrenceType RecurrenceType { get; private set; }
+            = MaintenanceRecurrenceType.None;
+
+        public int RecurrenceInterval { get; private set; } = 1;
+
+        public DateTime? RecurrenceEndDate { get; private set; }
+
+        public int? ParentMaintenanceId { get; private set; }
+
+        public bool NextOccurrenceCreated { get; private set; }
+
         public LabRoom? LabRoom { get; private set; }
 
         public Equipment? Equipment { get; private set; }
@@ -86,6 +97,64 @@
             EndTime = endTime;
             MaintenanceCost = maintenanceCost;
             Notes = notes?.Trim();
+        }
+
+        public void ConfigureRecurrence(
+            MaintenanceRecurrenceType recurrenceType,
+            int recurrenceInterval,
+            DateTime? recurrenceEndDate,
+            int? parentMaintenanceId = null)
+        {
+            if (!Enum.IsDefined(recurrenceType))
+                throw new ArgumentException("Kiểu lặp bảo trì không hợp lệ.");
+
+            if (recurrenceType == MaintenanceRecurrenceType.None)
+            {
+                RecurrenceType = MaintenanceRecurrenceType.None;
+                RecurrenceInterval = 1;
+                RecurrenceEndDate = null;
+                ParentMaintenanceId = parentMaintenanceId;
+                NextOccurrenceCreated = false;
+                return;
+            }
+
+            if (recurrenceInterval <= 0)
+                throw new ArgumentException("Khoảng lặp phải lớn hơn 0.");
+
+            if (recurrenceEndDate.HasValue
+                && recurrenceEndDate.Value <= StartTime)
+            {
+                throw new ArgumentException(
+                    "Ngày kết thúc chu kỳ phải sau thời gian bắt đầu bảo trì.");
+            }
+
+            RecurrenceType = recurrenceType;
+            RecurrenceInterval = recurrenceInterval;
+            RecurrenceEndDate = recurrenceEndDate;
+            ParentMaintenanceId = parentMaintenanceId;
+            NextOccurrenceCreated = false;
+        }
+
+        public DateTime GetNextOccurrenceStart()
+        {
+            return RecurrenceType switch
+            {
+                MaintenanceRecurrenceType.Daily =>
+                    StartTime.AddDays(RecurrenceInterval),
+                MaintenanceRecurrenceType.Weekly =>
+                    StartTime.AddDays(7 * RecurrenceInterval),
+                MaintenanceRecurrenceType.Monthly =>
+                    StartTime.AddMonths(RecurrenceInterval),
+                _ => throw new InvalidOperationException(
+                    "Lịch bảo trì này không được cấu hình lặp.")
+            };
+        }
+
+        public void MarkNextOccurrenceCreated()
+        {
+            if (RecurrenceType == MaintenanceRecurrenceType.None)
+                throw new InvalidOperationException("Lịch bảo trì không lặp.");
+            NextOccurrenceCreated = true;
         }
 
         public void Start()

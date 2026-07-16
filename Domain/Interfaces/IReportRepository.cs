@@ -1,30 +1,42 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
+﻿using Domain.Entities;
 
 namespace Domain.Interfaces
 {
-    // phần báo cáo tỷ lệ sử dụng phòng/thiết bị
     public interface IReportRepository
     {
-    //    Task<IReadOnlyList<ResourceUsageReportDto>> GetLabUsageReportAsync(
-    //        DateTime from,
-    //        DateTime to,
-    //        CancellationToken cancellationToken = default);
+        Task<IReadOnlyList<LabRoom>> GetLabRoomsAsync(
+            IReadOnlyCollection<int>? allowedLabIds,
+            CancellationToken cancellationToken = default);
 
-    //    Task<IReadOnlyList<ResourceUsageReportDto>> GetEquipmentUsageReportAsync(
-    //        DateTime from,
-    //        DateTime to,
-    //        CancellationToken cancellationToken = default);
+        Task<IReadOnlyList<Equipment>> GetEquipmentsAsync(
+            IReadOnlyCollection<int>? allowedLabIds,
+            CancellationToken cancellationToken = default);
 
-    //    Task<IReadOnlyList<DepartmentUsageReportDto>> GetDepartmentUsageReportAsync(
-    //        DateTime from,
-    //        DateTime to,
-    //        CancellationToken cancellationToken = default);
+        Task<IReadOnlyList<Booking>> GetBookingsAsync(
+            DateTime from,
+            DateTime to,
+            IReadOnlyCollection<int>? allowedLabIds,
+            CancellationToken cancellationToken = default);
 
-    //    Task<IReadOnlyList<MaintenanceCostReportDto>> GetMaintenanceCostReportAsync(
-    //        DateTime from,
-    //        DateTime to,
-    //        CancellationToken cancellationToken = default);
+        Task<IReadOnlyList<UsageLog>> GetUsageLogsAsync(
+            DateTime from,
+            DateTime to,
+            IReadOnlyCollection<int>? allowedLabIds,
+            CancellationToken cancellationToken = default);
+
+        Task<IReadOnlyList<Maintenance>> GetMaintenancesAsync(
+            DateTime from,
+            DateTime to,
+            IReadOnlyCollection<int>? allowedLabIds,
+            CancellationToken cancellationToken = default);
+
+        Task<IReadOnlyList<Violation>> GetViolationsAsync(
+            DateTime from,
+            DateTime to,
+            IReadOnlyCollection<int>? allowedLabIds,
+            CancellationToken cancellationToken = default);
+
+        Task<IReadOnlyList<User>> GetUsersWithPenaltyPointsAsync(
+            CancellationToken cancellationToken = default);
     }
 }
