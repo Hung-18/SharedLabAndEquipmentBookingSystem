@@ -13,7 +13,7 @@ namespace Application.DTOs.Auth
                 .NotEmpty().WithMessage("Email can't empty")
                 .EmailAddress().WithMessage("Email must correct format");
 
-            RuleFor(x => x.newPassword)
+            RuleFor(x => x.NewPassword)
                 .NotEmpty().WithMessage("Password can't empty")
                 .MinimumLength(8).WithMessage("Password must > 8 charactor")
                 .Matches("[A-Z]").WithMessage("Password must have less than 1 upper case")

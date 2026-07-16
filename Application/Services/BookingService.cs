@@ -1239,32 +1239,32 @@ namespace Application.Services
             };
         }
 
-        public async Task<PageResult<BookingResponse>> PageResultAsync(int page, int pageSize, CancellationToken cancelation)
-        {
-            var user = _currentUserService.UserId;
-            if (user == null)
-            {
-                throw new UnauthorizedAccessException("Please login to continue!");
-            }
-            var booking = await _repository.PageResultAsync(user.Value, page, pageSize, cancelation);
-            var total = await _repository.CountPageAsync(user);
-            var data = booking.Select(b => new BookingResponse
-            {
-                BookingId = b.BookingId,
-                UserId = b.UserId,
-                PurposeType = b.PurposeType.ToString() ?? "N/A",
-                StartTime = b.StartTime,
-                EndTime = b.EndTime,
-                Status = b.Status.ToString(), 
-                CreatedAt = b.CreatedAt
-            }).ToList();
-            return new PageResult<BookingResponse>
-            {
-                Page = page,
-                PageSize = pageSize,
-                Total = total,
-                Data = data
-            };
-        }
+        //public async Task<PageResult<BookingResponse>> PageResultAsync(int page, int pageSize, CancellationToken cancelation)
+        //{
+        //    var user = _currentUserService.UserId;
+        //    if (user == null)
+        //    {
+        //        throw new UnauthorizedAccessException("Please login to continue!");
+        //    }
+        //    var booking = await _repository.PageResultAsync(user.Value, page, pageSize, cancelation);
+        //    var total = await _repository.CountPageAsync(user);
+        //    var data = booking.Select(b => new BookingResponse
+        //    {
+        //        BookingId = b.BookingId,
+        //        UserId = b.UserId,
+        //        PurposeType = b.PurposeType.ToString() ?? "N/A",
+        //        StartTime = b.StartTime,
+        //        EndTime = b.EndTime,
+        //        Status = b.Status.ToString(), 
+        //        CreatedAt = b.CreatedAt
+        //    }).ToList();
+        //    return new PageResult<BookingResponse>
+        //    {
+        //        Page = page,
+        //        PageSize = pageSize,
+        //        Total = total,
+        //        Data = data
+        //    };
+        //}
     }
 }

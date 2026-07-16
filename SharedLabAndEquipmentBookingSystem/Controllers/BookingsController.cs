@@ -22,13 +22,9 @@ namespace API.Controllers
         [HttpGet]
         [Authorize(Roles = "Admin,LabManager")]
         [ProducesResponseType(StatusCodes.Status200OK)]
-        public async Task<ActionResult<PageResult<BookingResponse>>> GetAll([FromQuery]int page = 1, [FromQuery]int pageSize = 10, CancellationToken cancellationToken = default)
-        {
-            if(page < 1) page = 1;
-            if(pageSize < 10) pageSize = 10;
-            if (pageSize > 50) pageSize = 50;
-            var booking = await _bookingService.PageResultAsync(page, pageSize, cancellationToken);
-            return Ok(booking);
+        public async Task<ActionResult<PageResult<BookingResponse>>> GetAll( CancellationToken cancellationToken = default)
+        { 
+            return Ok(await _bookingService.GetAllAsync(cancellationToken));
         }
 
         [HttpGet("{id:int}")]
