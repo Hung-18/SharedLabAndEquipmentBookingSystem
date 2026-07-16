@@ -3,9 +3,6 @@ using Application.Interfaces;
 using Domain;
 using Domain.Entities;
 using Domain.Interfaces;
-using System;
-using System.Collections.Generic;
-using System.Text;
 
 namespace Application.Services
 {
@@ -13,60 +10,82 @@ namespace Application.Services
     {
         private readonly IWaitlistRepository _repository;
         private readonly IUnitOfWork _unitOfWork;
+        private readonly ICurrentUserService _currentUserService;
 
         public WaitlistService(
             IWaitlistRepository repository,
-            IUnitOfWork unitOfWork)
+            IUnitOfWork unitOfWork,
+            ICurrentUserService currentUserService)
         {
             _repository = repository;
             _unitOfWork = unitOfWork;
+            _currentUserService = currentUserService;
         }
 
         public async Task<List<WaitlistResponse>> GetAllAsync(
             CancellationToken cancellationToken)
         {
-            var waitlists = await _repository.GetAllAsync(
-                cancellationToken);
+            var actor = await GetCurrentActiveUserAsync(cancellationToken);
+            EnsureManagerOrAdmin(actor);
 
-            return waitlists
-                .Select(MapResponse)
-                .ToList();
+            var waitlists = await _repository.GetAllAsync(cancellationToken);
+            var result = new List<WaitlistResponse>();
+
+            foreach (var waitlist in waitlists)
+            {
+                if (actor.Role?.RoleName == RoleName.Admin
+                    || await CanManageResourceAsync(
+                        actor.UserId,
+                        waitlist.LabId,
+                        waitlist.EquipmentId,
+                        cancellationToken))
+                {
+                    result.Add(MapResponse(waitlist));
+                }
+            }
+
+            return result;
         }
 
         public async Task<WaitlistResponse?> GetByIdAsync(
             int id,
             CancellationToken cancellationToken)
         {
-            var waitlist = await _repository.GetByIdAsync(
-                id,
-                cancellationToken);
+            var actor = await GetAuthenticatedUserAsync(cancellationToken);
+            var waitlist = await _repository.GetByIdAsync(id, cancellationToken);
 
-            return waitlist is null
-                ? null
-                : MapResponse(waitlist);
+            if (waitlist is null)
+                return null;
+
+            var canRead = waitlist.UserId == actor.UserId
+                || actor.Role?.RoleName == RoleName.Admin
+                || (actor.Role?.RoleName == RoleName.LabManager
+                    && await CanManageResourceAsync(
+                        actor.UserId,
+                        waitlist.LabId,
+                        waitlist.EquipmentId,
+                        cancellationToken));
+
+            if (!canRead)
+                throw new UnauthorizedAccessException("Bạn không có quyền xem hàng đợi này.");
+
+            return MapResponse(waitlist);
         }
 
         public async Task<List<WaitlistResponse>> GetByUserIdAsync(
             int userId,
             CancellationToken cancellationToken)
         {
-            var user = await _unitOfWork.Users.GetUserByIdAsync(
-                userId,
-                cancellationToken);
+            var actor = await GetAuthenticatedUserAsync(cancellationToken);
 
-            if (user is null)
-            {
-                throw new KeyNotFoundException(
-                    $"Không tìm thấy người dùng có ID {userId}.");
-            }
+            if (actor.UserId != userId && actor.Role?.RoleName != RoleName.Admin)
+                throw new UnauthorizedAccessException("Bạn chỉ được xem hàng đợi của chính mình.");
 
-            var waitlists = await _repository.GetByUserIdAsync(
-                userId,
-                cancellationToken);
+            var user = await _unitOfWork.Users.GetUserByIdAsync(userId, cancellationToken)
+                ?? throw new KeyNotFoundException($"Không tìm thấy người dùng có ID {userId}.");
 
-            return waitlists
-                .Select(MapResponse)
-                .ToList();
+            var waitlists = await _repository.GetByUserIdAsync(user.UserId, cancellationToken);
+            return waitlists.Select(MapResponse).ToList();
         }
 
         public async Task<List<WaitlistResponse>> GetQueueAsync(
@@ -76,12 +95,17 @@ namespace Application.Services
             DateTime requestedEnd,
             CancellationToken cancellationToken)
         {
-            ValidateTime(requestedStart, requestedEnd);
+            var actor = await GetCurrentActiveUserAsync(cancellationToken);
+            EnsureManagerOrAdmin(actor);
+            ValidateTime(requestedStart, requestedEnd, requireFuture: false);
+            await ValidateResourceAsync(labId, equipmentId, cancellationToken);
 
-            await ValidateResourceAsync(
-                labId,
-                equipmentId,
-                cancellationToken);
+            if (actor.Role?.RoleName == RoleName.LabManager
+                && !await CanManageResourceAsync(actor.UserId, labId, equipmentId, cancellationToken))
+            {
+                throw new UnauthorizedAccessException(
+                    "LabManager chỉ được xem hàng đợi của phòng mình quản lý.");
+            }
 
             var waitlists = await _repository.GetWaitingByResourceAsync(
                 labId,
@@ -90,9 +114,7 @@ namespace Application.Services
                 requestedEnd,
                 cancellationToken);
 
-            return waitlists
-                .Select(MapResponse)
-                .ToList();
+            return waitlists.Select(MapResponse).ToList();
         }
 
         public async Task<WaitlistResponse> CreateAsync(
@@ -100,90 +122,75 @@ namespace Application.Services
             CancellationToken cancellationToken)
         {
             ArgumentNullException.ThrowIfNull(request);
+            ValidateTime(request.RequestedStart, request.RequestedEnd, requireFuture: true);
 
-            ValidateTime(
-                request.RequestedStart,
-                request.RequestedEnd);
+            var actor = await GetAuthenticatedUserAsync(cancellationToken);
+            await EnsureCanCreateWaitlistAsync(actor, cancellationToken);
+            await ValidateResourceAsync(request.LabId, request.EquipmentId, cancellationToken);
 
-            await ValidateRequesterAsync(
-                request.UserId,
-                cancellationToken);
-
-            await ValidateResourceAsync(
-                request.LabId,
-                request.EquipmentId,
-                cancellationToken);
-
-            bool maintenanceConflict =
-                await _unitOfWork.Maintenances.HasMaintenanceConflictAsync(
-                    request.LabId,
-                    request.EquipmentId,
-                    request.RequestedStart,
-                    request.RequestedEnd,
-                    null,
-                    cancellationToken);
-
-            if (maintenanceConflict)
-            {
-                throw new InvalidOperationException(
-                    "Khung giờ này đang có lịch bảo trì, không thể vào hàng đợi.");
-            }
-
-            bool bookingConflict =
-                await _unitOfWork.Bookings.HasBookingConflictAsync(
-                    request.LabId,
-                    request.EquipmentId,
-                    request.RequestedStart,
-                    request.RequestedEnd,
-                    null,
-                    true,
-                    cancellationToken);
-
-            if (!bookingConflict)
-            {
-                throw new InvalidOperationException(
-                    "Khung giờ này đang còn trống. Hãy tạo booking thay vì vào hàng đợi.");
-            }
-
-            bool alreadyWaiting =
-                await _repository.HasUserAlreadyWaitingAsync(
-                    request.UserId,
-                    request.LabId,
-                    request.EquipmentId,
-                    request.RequestedStart,
-                    request.RequestedEnd,
-                    cancellationToken);
-
-            if (alreadyWaiting)
-            {
-                throw new InvalidOperationException(
-                    "Người dùng đã có trong hàng đợi của khung giờ này.");
-            }
-
-            int queuePosition =
-                await _repository.GetNextQueuePositionAsync(
-                    request.LabId,
-                    request.EquipmentId,
-                    request.RequestedStart,
-                    request.RequestedEnd,
-                    cancellationToken);
-
-            var waitlist = new Waitlist(
-                request.UserId,
+            var maintenanceConflict = await _unitOfWork.Maintenances.HasMaintenanceConflictAsync(
                 request.LabId,
                 request.EquipmentId,
                 request.RequestedStart,
                 request.RequestedEnd,
-                queuePosition);
-
-            await _repository.AddAsync(
-                waitlist,
+                null,
                 cancellationToken);
 
-            await _unitOfWork.SaveChangesAsync(
+            if (maintenanceConflict)
+                throw new InvalidOperationException(
+                    "Khung giờ này đang có lịch bảo trì, không thể vào hàng đợi.");
+
+            var approvedConflict = await _unitOfWork.Bookings.HasBookingConflictAsync(
+                request.LabId,
+                request.EquipmentId,
+                request.RequestedStart,
+                request.RequestedEnd,
+                null,
+                includePending: false,
+                cancellationToken: cancellationToken);
+
+            if (!approvedConflict)
+                throw new InvalidOperationException(
+                    "Khung giờ này chưa bị booking Approved khóa. Hãy tạo booking Pending thay vì vào hàng đợi.");
+
+            Waitlist? waitlist = null;
+
+            await _unitOfWork.ExecuteInSerializableTransactionAsync(
+                async ct =>
+                {
+                    var alreadyWaiting = await _repository.HasUserAlreadyWaitingAsync(
+                        actor.UserId,
+                        request.LabId,
+                        request.EquipmentId,
+                        request.RequestedStart,
+                        request.RequestedEnd,
+                        ct);
+
+                    if (alreadyWaiting)
+                        throw new InvalidOperationException(
+                            "Bạn đã có trong hàng đợi của khung giờ này.");
+
+                    var queuePosition = await _repository.GetNextQueuePositionAsync(
+                        request.LabId,
+                        request.EquipmentId,
+                        request.RequestedStart,
+                        request.RequestedEnd,
+                        ct);
+
+                    waitlist = new Waitlist(
+                        actor.UserId,
+                        request.LabId,
+                        request.EquipmentId,
+                        request.RequestedStart,
+                        request.RequestedEnd,
+                        queuePosition);
+
+                    await _repository.AddAsync(waitlist, ct);
+                    await _unitOfWork.SaveChangesAsync(ct);
+                },
                 cancellationToken);
 
-            return MapResponse(waitlist);
+            return MapResponse(waitlist!);
         }
 
         public async Task<WaitlistResponse> NotifyNextAsync(
@@ -191,165 +198,181 @@ namespace Application.Services
             CancellationToken cancellationToken)
         {
             ArgumentNullException.ThrowIfNull(request);
+            ValidateTime(request.RequestedStart, request.RequestedEnd, requireFuture: false);
 
-            ValidateTime(
-                request.RequestedStart,
-                request.RequestedEnd);
+            var actor = await GetCurrentActiveUserAsync(cancellationToken);
+            EnsureManagerOrAdmin(actor);
+            await ValidateResourceAsync(request.LabId, request.EquipmentId, cancellationToken);
 
-            await ValidateManagerAsync(
-                request.ActorUserId,
-                cancellationToken);
-
-            await ValidateResourceAsync(
-                request.LabId,
-                request.EquipmentId,
-                cancellationToken);
-
-            bool bookingConflict =
-                await _unitOfWork.Bookings.HasBookingConflictAsync(
+            if (actor.Role?.RoleName == RoleName.LabManager
+                && !await CanManageResourceAsync(
+                    actor.UserId,
                     request.LabId,
                     request.EquipmentId,
-                    request.RequestedStart,
-                    request.RequestedEnd,
-                    null,
-                    true,
-                    cancellationToken);
-
-            if (bookingConflict)
+                    cancellationToken))
             {
-                throw new InvalidOperationException(
-                    "Tài nguyên vẫn đang có booking trong khung giờ này.");
+                throw new UnauthorizedAccessException(
+                    "LabManager chỉ được thao tác với phòng mình quản lý.");
             }
 
-            bool maintenanceConflict =
-                await _unitOfWork.Maintenances.HasMaintenanceConflictAsync(
-                    request.LabId,
-                    request.EquipmentId,
-                    request.RequestedStart,
-                    request.RequestedEnd,
-                    null,
-                    cancellationToken);
+            Waitlist? next = null;
 
-            if (maintenanceConflict)
-            {
-                throw new InvalidOperationException(
-                    "Tài nguyên vẫn đang có lịch bảo trì trong khung giờ này.");
-            }
+            await _unitOfWork.ExecuteInSerializableTransactionAsync(
+                async ct =>
+                {
+                    next = await NotifyNextForResourceAsync(
+                        request.LabId,
+                        request.EquipmentId,
+                        request.RequestedStart,
+                        request.RequestedEnd,
+                        ct);
 
-            var next = await NotifyNextForResourceAsync(
-                request.LabId,
-                request.EquipmentId,
-                request.RequestedStart,
-                request.RequestedEnd,
+                    if (next is null)
+                        throw new KeyNotFoundException(
+                            "Không có người dùng nào đang chờ hoặc tài nguyên chưa thực sự trống.");
+
+                    await _unitOfWork.SaveChangesAsync(ct);
+                },
                 cancellationToken);
 
-            if (next is null)
-            {
-                throw new KeyNotFoundException(
-                    "Không có người dùng nào đang chờ khung giờ này.");
-            }
-
-            await _unitOfWork.SaveChangesAsync(
-                cancellationToken);
-
-            return MapResponse(next);
+            return MapResponse(next!);
         }
 
         public async Task MarkBookedAsync(
             int id,
-            int userId,
             CancellationToken cancellationToken)
         {
-            var waitlist = await GetWaitlistOrThrowAsync(
-                id,
-                cancellationToken);
+            var actor = await GetAuthenticatedUserAsync(cancellationToken);
+            var waitlist = await GetWaitlistOrThrowAsync(id, cancellationToken);
 
-            if (waitlist.UserId != userId)
-            {
+            if (waitlist.UserId != actor.UserId)
                 throw new UnauthorizedAccessException(
                     "Chỉ chủ sở hữu hàng đợi mới được xác nhận đã booking.");
-            }
 
             var bookings = await _unitOfWork.Bookings.GetCalendarAsync(
                 waitlist.RequestedStart,
                 waitlist.RequestedEnd,
-                waitlist.LabId,
-                waitlist.EquipmentId,
+                null,
+                null,
                 cancellationToken);
 
-            bool hasMatchingBooking = bookings.Any(x =>
-                x.UserId == waitlist.UserId
-                && x.StartTime == waitlist.RequestedStart
-                && x.EndTime == waitlist.RequestedEnd
-                && (x.Status == BookingStatus.Pending
-                    || x.Status == BookingStatus.Approved));
+            var matchingBookingExists = bookings.Any(booking =>
+                booking.UserId == actor.UserId
+                && booking.StartTime == waitlist.RequestedStart
+                && booking.EndTime == waitlist.RequestedEnd
+                && booking.Status is BookingStatus.Pending or BookingStatus.Approved
+                && booking.BookingItems.Any(item =>
+                    (waitlist.LabId.HasValue && item.LabId == waitlist.LabId)
+                    || (waitlist.EquipmentId.HasValue
+                        && item.EquipmentId == waitlist.EquipmentId)));
 
-            if (!hasMatchingBooking)
-            {
+            if (!matchingBookingExists)
                 throw new InvalidOperationException(
-                    "Chưa tìm thấy booking tương ứng của người dùng cho khung giờ này.");
-            }
+                    "Chưa tìm thấy booking tương ứng để chuyển hàng đợi sang Booked.");
 
             waitlist.MarkBooked();
             _repository.Update(waitlist);
-
-            await _unitOfWork.SaveChangesAsync(
-                cancellationToken);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
         }
 
         public async Task CancelAsync(
             int id,
-            int userId,
             CancellationToken cancellationToken)
         {
-            var waitlist = await GetWaitlistOrThrowAsync(
-                id,
-                cancellationToken);
+            var actor = await GetCurrentActiveUserAsync(cancellationToken);
+            var waitlist = await GetWaitlistOrThrowAsync(id, cancellationToken);
 
-            var actor = await _unitOfWork.Users.GetUserByIdAsync(
-                userId,
-                cancellationToken);
+            var canCancel = waitlist.UserId == actor.UserId
+                || actor.Role?.RoleName == RoleName.Admin
+                || (actor.Role?.RoleName == RoleName.LabManager
+                    && await CanManageResourceAsync(
+                        actor.UserId,
+                        waitlist.LabId,
+                        waitlist.EquipmentId,
+                        cancellationToken));
 
-            if (actor is null)
-            {
-                throw new KeyNotFoundException(
-                    $"Không tìm thấy người dùng có ID {userId}.");
-            }
-
-            bool isOwner = waitlist.UserId == userId;
-            bool isManager = actor.Role?.RoleName == RoleName.Admin
-                || actor.Role?.RoleName == RoleName.LabManager;
-
-            if (!isOwner && !isManager)
-            {
+            if (!canCancel)
                 throw new UnauthorizedAccessException(
                     "Không có quyền hủy bản ghi hàng đợi này.");
-            }
 
-            waitlist.Cancel();
-            _repository.Update(waitlist);
+            var shouldNotifyNext = waitlist.Status == WaitlistStatus.Notified;
 
-            await _unitOfWork.SaveChangesAsync(
+            await _unitOfWork.ExecuteInSerializableTransactionAsync(
+                async ct =>
+                {
+                    waitlist.Cancel();
+                    _repository.Update(waitlist);
+
+                    await _unitOfWork.Notifications.AddAsync(
+                        new Notification(
+                            waitlist.UserId,
+                            "Hàng đợi đã bị hủy",
+                            $"Hàng đợi #{waitlist.WaitlistId} đã bị hủy.",
+                            NotificationType.System),
+                        ct);
+
+                    if (shouldNotifyNext)
+                    {
+                        await NotifyNextForResourceAsync(
+                            waitlist.LabId,
+                            waitlist.EquipmentId,
+                            waitlist.RequestedStart,
+                            waitlist.RequestedEnd,
+                            ct);
+                    }
+
+                    await _unitOfWork.SaveChangesAsync(ct);
+                },
                 cancellationToken);
         }
 
         public async Task ExpireAsync(
             int id,
-            int actorUserId,
             CancellationToken cancellationToken)
         {
-            await ValidateManagerAsync(
-                actorUserId,
-                cancellationToken);
+            var actor = await GetCurrentActiveUserAsync(cancellationToken);
+            EnsureManagerOrAdmin(actor);
+            var waitlist = await GetWaitlistOrThrowAsync(id, cancellationToken);
 
-            var waitlist = await GetWaitlistOrThrowAsync(
-                id,
-                cancellationToken);
+            if (actor.Role?.RoleName == RoleName.LabManager
+                && !await CanManageResourceAsync(
+                    actor.UserId,
+                    waitlist.LabId,
+                    waitlist.EquipmentId,
+                    cancellationToken))
+            {
+                throw new UnauthorizedAccessException(
+                    "LabManager chỉ được thao tác với phòng mình quản lý.");
+            }
 
-            waitlist.Expire();
-            _repository.Update(waitlist);
+            var shouldNotifyNext = waitlist.Status == WaitlistStatus.Notified;
 
-            await _unitOfWork.SaveChangesAsync(
+            await _unitOfWork.ExecuteInSerializableTransactionAsync(
+                async ct =>
+                {
+                    waitlist.Expire();
+                    _repository.Update(waitlist);
+
+                    await _unitOfWork.Notifications.AddAsync(
+                        new Notification(
+                            waitlist.UserId,
+                            "Quyền ưu tiên hàng đợi đã hết hạn",
+                            $"Hàng đợi #{waitlist.WaitlistId} đã hết hạn.",
+                            NotificationType.System),
+                        ct);
+
+                    if (shouldNotifyNext)
+                    {
+                        await NotifyNextForResourceAsync(
+                            waitlist.LabId,
+                            waitlist.EquipmentId,
+                            waitlist.RequestedStart,
+                            waitlist.RequestedEnd,
+                            ct);
+                    }
+
+                    await _unitOfWork.SaveChangesAsync(ct);
+                },
                 cancellationToken);
         }
 
@@ -359,42 +382,154 @@ namespace Application.Services
         {
             var booking = await _unitOfWork.Bookings.GetDetailAsync(
                 bookingId,
-                cancellationToken);
-
-            if (booking is null)
-            {
-                throw new KeyNotFoundException(
+                cancellationToken)
+                ?? throw new KeyNotFoundException(
                     $"Không tìm thấy booking có ID {bookingId}.");
-            }
 
             if (booking.Status != BookingStatus.Cancelled)
+                throw new InvalidOperationException(
+                    "Booking phải ở trạng thái Cancelled trước khi giải phóng waitlist.");
+
+            await NotifyForReleasedBookingCoreAsync(booking, cancellationToken);
+        }
+
+        public async Task NotifyNextForReleasedBookingAsync(
+            int bookingId,
+            CancellationToken cancellationToken)
+        {
+            var booking = await _unitOfWork.Bookings.GetDetailAsync(
+                bookingId,
+                cancellationToken)
+                ?? throw new KeyNotFoundException(
+                    $"Không tìm thấy booking có ID {bookingId}.");
+
+            if (booking.Status is not BookingStatus.Cancelled
+                and not BookingStatus.Completed)
             {
                 throw new InvalidOperationException(
-                    "Chỉ được thông báo hàng đợi sau khi booking đã bị hủy.");
+                    "Chỉ booking Cancelled hoặc Completed mới giải phóng waitlist.");
             }
 
-            bool changed = false;
+            await NotifyForReleasedBookingCoreAsync(booking, cancellationToken);
+        }
 
-            foreach (var item in booking.BookingItems)
-            {
-                var next = await NotifyNextForResourceAsync(
-                    item.LabId,
-                    item.EquipmentId,
-                    booking.StartTime,
-                    booking.EndTime,
-                    cancellationToken);
+        public async Task<int> ProcessExpiredNotificationsAsync(
+            DateTime expiredBefore,
+            CancellationToken cancellationToken)
+        {
+            int expiredCount = 0;
 
-                if (next is not null)
+            await _unitOfWork.ExecuteInSerializableTransactionAsync(
+                async ct =>
                 {
-                    changed = true;
-                }
-            }
+                    var expiredItems = await _repository.FindAsync(
+                        x => x.Status == WaitlistStatus.Notified
+                            && x.NotifiedAt.HasValue
+                            && x.NotifiedAt.Value <= expiredBefore,
+                        ct);
 
-            if (changed)
+                    foreach (var item in expiredItems)
+                    {
+                        item.Expire();
+                        _repository.Update(item);
+                        expiredCount++;
+
+                        await _unitOfWork.Notifications.AddAsync(
+                            new Notification(
+                                item.UserId,
+                                "Lượt nhận chỗ trong hàng đợi đã hết hạn",
+                                $"Bạn đã không tạo booking kịp thời cho khung "
+                                + $"{item.RequestedStart:dd/MM/yyyy HH:mm} - "
+                                + $"{item.RequestedEnd:dd/MM/yyyy HH:mm}.",
+                                NotificationType.WaitlistAvailable),
+                            ct);
+
+                        await NotifyNextForResourceAsync(
+                            item.LabId,
+                            item.EquipmentId,
+                            item.RequestedStart,
+                            item.RequestedEnd,
+                            ct);
+                    }
+
+                    if (expiredCount > 0)
+                        await _unitOfWork.SaveChangesAsync(ct);
+                },
+                cancellationToken);
+
+            return expiredCount;
+        }
+
+        private async Task NotifyForReleasedBookingCoreAsync(
+            Booking booking,
+            CancellationToken cancellationToken)
+        {
+            await _unitOfWork.ExecuteInSerializableTransactionAsync(async ct =>
             {
-                await _unitOfWork.SaveChangesAsync(
-                    cancellationToken);
-            }
+                var resourceKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                foreach (var item in booking.BookingItems)
+                {
+                    if (item.LabId.HasValue)
+                    {
+                        int labId = item.LabId.Value;
+                        if (resourceKeys.Add($"LAB:{labId}"))
+                        {
+                            await NotifyNextForResourceAsync(
+                                labId,
+                                null,
+                                booking.StartTime,
+                                booking.EndTime,
+                                ct);
+                        }
+
+                        var equipments = await _unitOfWork.Equipments.GetByLabIdAsync(
+                            labId,
+                            ct);
+                        foreach (var equipment in equipments)
+                        {
+                            if (resourceKeys.Add($"EQUIPMENT:{equipment.EquipmentId}"))
+                            {
+                                await NotifyNextForResourceAsync(
+                                    null,
+                                    equipment.EquipmentId,
+                                    booking.StartTime,
+                                    booking.EndTime,
+                                    ct);
+                            }
+                        }
+                    }
+                    else if (item.EquipmentId.HasValue)
+                    {
+                        int equipmentId = item.EquipmentId.Value;
+                        if (resourceKeys.Add($"EQUIPMENT:{equipmentId}"))
+                        {
+                            await NotifyNextForResourceAsync(
+                                null,
+                                equipmentId,
+                                booking.StartTime,
+                                booking.EndTime,
+                                ct);
+                        }
+
+                        var equipment = await _unitOfWork.Equipments.GetByIdAsync(
+                            equipmentId,
+                            ct);
+                        if (equipment is not null
+                            && resourceKeys.Add($"LAB:{equipment.LabId}"))
+                        {
+                            await NotifyNextForResourceAsync(
+                                equipment.LabId,
+                                null,
+                                booking.StartTime,
+                                booking.EndTime,
+                                ct);
+                        }
+                    }
+                }
+
+                await _unitOfWork.SaveChangesAsync(ct);
+            }, cancellationToken);
         }
 
         private async Task<Waitlist?> NotifyNextForResourceAsync(
@@ -404,34 +539,39 @@ namespace Application.Services
             DateTime requestedEnd,
             CancellationToken cancellationToken)
         {
-            bool bookingConflict =
-                await _unitOfWork.Bookings.HasBookingConflictAsync(
-                    labId,
-                    equipmentId,
-                    requestedStart,
-                    requestedEnd,
-                    null,
-                    true,
-                    cancellationToken);
+            var alreadyNotified = await _repository.ExistsAsync(
+                x => x.Status == WaitlistStatus.Notified
+                    && x.RequestedStart == requestedStart
+                    && x.RequestedEnd == requestedEnd
+                    && ((labId.HasValue && x.LabId == labId.Value)
+                        || (equipmentId.HasValue && x.EquipmentId == equipmentId.Value)),
+                cancellationToken);
 
-            if (bookingConflict)
-            {
+            if (alreadyNotified)
                 return null;
-            }
 
-            bool maintenanceConflict =
-                await _unitOfWork.Maintenances.HasMaintenanceConflictAsync(
-                    labId,
-                    equipmentId,
-                    requestedStart,
-                    requestedEnd,
-                    null,
-                    cancellationToken);
+            var approvedConflict = await _unitOfWork.Bookings.HasBookingConflictAsync(
+                labId,
+                equipmentId,
+                requestedStart,
+                requestedEnd,
+                null,
+                includePending: false,
+                cancellationToken: cancellationToken);
+
+            if (approvedConflict)
+                return null;
+
+            var maintenanceConflict = await _unitOfWork.Maintenances.HasMaintenanceConflictAsync(
+                labId,
+                equipmentId,
+                requestedStart,
+                requestedEnd,
+                null,
+                cancellationToken);
 
             if (maintenanceConflict)
-            {
                 return null;
-            }
 
             var next = await _repository.GetNextInQueueAsync(
                 labId,
@@ -441,80 +581,73 @@ namespace Application.Services
                 cancellationToken);
 
             if (next is null)
-            {
                 return null;
-            }
 
             next.MarkNotified();
             _repository.Update(next);
 
-            string resourceName = labId.HasValue
+            var resourceName = labId.HasValue
                 ? $"phòng lab ID {labId.Value}"
                 : $"thiết bị ID {equipmentId!.Value}";
 
-            var notification = new Notification(
-                next.UserId,
-                "Khung giờ trong hàng đợi đã có chỗ",
-                $"{resourceName} đã trống từ "
-                + $"{requestedStart:dd/MM/yyyy HH:mm} đến "
-                + $"{requestedEnd:dd/MM/yyyy HH:mm}. "
-                + "Hãy tạo booking sớm.",
-                NotificationType.WaitlistAvailable);
-
             await _unitOfWork.Notifications.AddAsync(
-                notification,
+                new Notification(
+                    next.UserId,
+                    "Khung giờ trong hàng đợi đã có chỗ",
+                    $"{resourceName} đã trống từ {requestedStart:dd/MM/yyyy HH:mm} "
+                    + $"đến {requestedEnd:dd/MM/yyyy HH:mm}. Hãy tạo booking sớm.",
+                    NotificationType.WaitlistAvailable),
                 cancellationToken);
 
             return next;
         }
 
-        private async Task ValidateRequesterAsync(
-            int userId,
+        private async Task<User> GetAuthenticatedUserAsync(
             CancellationToken cancellationToken)
         {
-            var user = await _unitOfWork.Users.GetUserByIdAsync(
-                userId,
-                cancellationToken);
+            var userId = _currentUserService.GetRequiredUserId();
+            var user = await _unitOfWork.Users.GetUserByIdAsync(userId, cancellationToken)
+                ?? throw new KeyNotFoundException($"Không tìm thấy người dùng có ID {userId}.");
+            user.TryUnlockExpiredRestriction(DateTime.UtcNow);
+            if (user.Status is UserStatus.Inactive or UserStatus.Locked)
+                throw new InvalidOperationException("Tài khoản không được phép thao tác.");
+            return user;
+        }
 
-            if (user is null)
-            {
-                throw new KeyNotFoundException(
-                    $"Không tìm thấy người dùng có ID {userId}.");
-            }
-
+        private async Task<User> GetCurrentActiveUserAsync(
+            CancellationToken cancellationToken)
+        {
+            var user = await GetAuthenticatedUserAsync(cancellationToken);
             if (user.Status != UserStatus.Active)
+                throw new InvalidOperationException("Tài khoản phải ở trạng thái Active.");
+            return user;
+        }
+
+        private async Task EnsureCanCreateWaitlistAsync(
+            User user,
+            CancellationToken cancellationToken)
+        {
+            if (user.Status == UserStatus.Restricted)
             {
+                if (user.RestrictionUntil.HasValue
+                    && user.RestrictionUntil.Value <= DateTime.UtcNow)
+                {
+                    user.Unlock();
+                    _unitOfWork.Users.Update(user);
+                    await _unitOfWork.SaveChangesAsync(cancellationToken);
+                    return;
+                }
+
                 throw new InvalidOperationException(
-                    "Người dùng đang không hoạt động hoặc bị hạn chế đặt lịch.");
+                    "Tài khoản đang bị hạn chế nên không thể vào hàng đợi.");
             }
         }
 
-        private async Task ValidateManagerAsync(
-            int userId,
-            CancellationToken cancellationToken)
+        private static void EnsureManagerOrAdmin(User user)
         {
-            var user = await _unitOfWork.Users.GetUserByIdAsync(
-                userId,
-                cancellationToken);
-
-            if (user is null)
-            {
-                throw new KeyNotFoundException(
-                    $"Không tìm thấy người dùng có ID {userId}.");
-            }
-
-            if (user.Status != UserStatus.Active)
-            {
-                throw new InvalidOperationException(
-                    "Người dùng thực hiện thao tác hiện không hoạt động.");
-            }
-
-            if (user.Role?.RoleName != RoleName.Admin
-                && user.Role?.RoleName != RoleName.LabManager)
-            {
+            if (user.Role?.RoleName is not RoleName.Admin and not RoleName.LabManager)
                 throw new UnauthorizedAccessException(
                     "Chỉ Admin hoặc LabManager được thực hiện thao tác này.");
-            }
         }
 
         private async Task ValidateResourceAsync(
@@ -523,81 +656,85 @@ namespace Application.Services
             CancellationToken cancellationToken)
         {
             if (labId.HasValue == equipmentId.HasValue)
-            {
                 throw new ArgumentException(
                     "Phải chọn đúng một trong hai: LabId hoặc EquipmentId.");
-            }
 
             if (labId.HasValue)
             {
-                var labRoom = await _unitOfWork.LabRooms.GetByIdAsync(
-                    labId.Value,
-                    cancellationToken);
-
-                if (labRoom is null)
-                {
-                    throw new KeyNotFoundException(
+                var lab = await _unitOfWork.LabRooms.GetByIdAsync(labId.Value, cancellationToken)
+                    ?? throw new KeyNotFoundException(
                         $"Không tìm thấy phòng lab có ID {labId.Value}.");
-                }
 
-                if (labRoom.Status == LabRoomStatus.Inactive)
-                {
-                    throw new InvalidOperationException(
-                        "Phòng lab đã ngừng hoạt động.");
-                }
+                if (lab.Status == LabRoomStatus.Inactive)
+                    throw new InvalidOperationException("Phòng lab đã ngừng hoạt động.");
             }
+            else
+            {
+                var equipment = await _unitOfWork.Equipments.GetDetailAsync(
+                    equipmentId!.Value,
+                    cancellationToken)
+                    ?? throw new KeyNotFoundException(
+                        $"Không tìm thấy thiết bị có ID {equipmentId.Value}.");
 
-            if (equipmentId.HasValue)
+                if (equipment.Status == EquipmentStatus.Retired)
+                    throw new InvalidOperationException("Thiết bị đã ngừng sử dụng.");
+            }
+        }
+
+        private async Task<bool> CanManageResourceAsync(
+            int managerId,
+            int? labId,
+            int? equipmentId,
+            CancellationToken cancellationToken)
+        {
+            int resourceLabId;
+
+            if (labId.HasValue)
+            {
+                resourceLabId = labId.Value;
+            }
+            else
             {
                 var equipment = await _unitOfWork.Equipments.GetByIdAsync(
-                    equipmentId.Value,
+                    equipmentId!.Value,
                     cancellationToken);
 
                 if (equipment is null)
-                {
-                    throw new KeyNotFoundException(
-                        $"Không tìm thấy thiết bị có ID {equipmentId.Value}.");
-                }
+                    return false;
 
-                if (equipment.Status == EquipmentStatus.Retired
-                    || equipment.Status == EquipmentStatus.Broken)
-                {
-                    throw new InvalidOperationException(
-                        "Thiết bị đang hỏng hoặc đã ngừng sử dụng.");
-                }
+                resourceLabId = equipment.LabId;
             }
+
+            var lab = await _unitOfWork.LabRooms.GetByIdAsync(
+                resourceLabId,
+                cancellationToken);
+
+            return lab?.ManagerId == managerId;
         }
 
         private async Task<Waitlist> GetWaitlistOrThrowAsync(
             int id,
             CancellationToken cancellationToken)
         {
-            var waitlist = await _repository.GetByIdAsync(
-                id,
-                cancellationToken);
-
-            if (waitlist is null)
-            {
-                throw new KeyNotFoundException(
+            return await _repository.GetByIdAsync(id, cancellationToken)
+                ?? throw new KeyNotFoundException(
                     $"Không tìm thấy hàng đợi có ID {id}.");
-            }
-
-            return waitlist;
         }
 
         private static void ValidateTime(
             DateTime requestedStart,
-            DateTime requestedEnd)
+            DateTime requestedEnd,
+            bool requireFuture)
         {
             if (requestedStart >= requestedEnd)
-            {
                 throw new ArgumentException(
                     "Thời gian bắt đầu phải nhỏ hơn thời gian kết thúc.");
-            }
+
+            if (requireFuture && requestedStart <= DateTime.UtcNow)
+                throw new ArgumentException("Thời gian bắt đầu phải ở tương lai.");
         }
 
-        private static WaitlistResponse MapResponse(
-            Waitlist waitlist)
+        private static WaitlistResponse MapResponse(Waitlist waitlist)
         {
             return new WaitlistResponse
             {
@@ -613,5 +750,4 @@ namespace Application.Services
             };
         }
     }
-
 }

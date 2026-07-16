@@ -11,12 +11,25 @@ namespace Application.AutoMapper
     {
         public MappingProfile()
         {
-            //map user sang authresponsedto
             CreateMap<User, AuthResponseDTO>();
-            //map user sang userDTO
-            CreateMap<User, UserDTO>();
 
-            
+            CreateMap<User, UserDTO>()
+                .ForMember(
+                    destination =>
+                        destination.RoleName,
+                    option => option.MapFrom(
+                        source =>
+                            source.Role != null
+                                ? source.Role.RoleName.ToString()
+                                : string.Empty))
+                .ForMember(
+                    destination =>
+                        destination.DepartmentName,
+                    option => option.MapFrom(
+                        source =>
+                            source.Department != null
+                                ? source.Department.DepartmentName
+                                : string.Empty));
         }
     }
 }

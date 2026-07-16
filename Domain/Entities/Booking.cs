@@ -100,6 +100,17 @@
             Status = BookingStatus.Rejected;
         }
 
+        public void ExpirePending(string reason)
+        {
+            EnsurePending();
+            RejectionReason = string.IsNullOrWhiteSpace(reason)
+                ? "Yêu cầu đã quá giờ bắt đầu."
+                : reason.Trim();
+            ApprovedById = null;
+            ApprovedAt = DateTime.UtcNow;
+            Status = BookingStatus.Rejected;
+        }
+
         public void Cancel()
         {
             if (Status != BookingStatus.Pending && Status != BookingStatus.Approved)

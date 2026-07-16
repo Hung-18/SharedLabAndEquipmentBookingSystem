@@ -1,17 +1,20 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Net;
-using System.Text.Json;
-using System.Threading.Tasks;
+﻿using Application.Exceptions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using System.Net;
+using System.Text.Json;
 
 namespace API.Middleware
 {
     public class GlobalExceptionMiddleware
     {
+        private static readonly JsonSerializerOptions JsonOptions = new()
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+        };
+
         private readonly RequestDelegate _next;
         private readonly ILogger<GlobalExceptionMiddleware> _logger;
 
@@ -46,30 +49,42 @@ namespace API.Middleware
         {
             context.Response.ContentType = "application/json";
 
-            var statusCode = HttpStatusCode.InternalServerError;
-            var message = "Server Error";
+            if (ex is ResourceUnavailableException resourceUnavailableException)
+            {
+                context.Response.StatusCode = StatusCodes.Status409Conflict;
 
-            // Lỗi xảy ra khi EF Core lưu dữ liệu xuống SQL Server
+                var conflictResponse = new
+                {
+                    statusCode = context.Response.StatusCode,
+                    message = resourceUnavailableException.Message,
+                    suggestedSlots = resourceUnavailableException.SuggestedSlots,
+                    timestamp = DateTime.UtcNow
+                };
+
+                string conflictJson = JsonSerializer.Serialize(
+                    conflictResponse,
+                    JsonOptions);
+
+                return context.Response.WriteAsync(conflictJson);
+            }
+
+            HttpStatusCode statusCode = HttpStatusCode.InternalServerError;
+            string message = "Server Error";
+
             if (ex is DbUpdateException dbUpdateEx
                 && dbUpdateEx.InnerException is SqlException sqlEx)
             {
-                // Lỗi do trigger hoặc THROW trong SQL Server
-                if (sqlEx.Number >= 50001
-                    && sqlEx.Number <= 50006)
+                if (sqlEx.Number >= 50001 && sqlEx.Number <= 50006)
                 {
                     statusCode = HttpStatusCode.Conflict;
                     message = sqlEx.Message;
                 }
-                // Lỗi khóa ngoại
                 else if (sqlEx.Number == 547)
                 {
                     statusCode = HttpStatusCode.BadRequest;
-                    message =
-                        "Dữ liệu liên kết không tồn tại hoặc đang được sử dụng.";
+                    message = "Dữ liệu liên kết không tồn tại hoặc đang được sử dụng.";
                 }
-                // Lỗi trùng dữ liệu UNIQUE
-                else if (sqlEx.Number == 2601
-                    || sqlEx.Number == 2627)
+                else if (sqlEx.Number is 2601 or 2627)
                 {
                     statusCode = HttpStatusCode.Conflict;
                     message = "Dữ liệu đã tồn tại.";
@@ -80,25 +95,21 @@ namespace API.Middleware
                     message = "Không thể lưu dữ liệu vào cơ sở dữ liệu.";
                 }
             }
-            // Không tìm thấy dữ liệu
             else if (ex is KeyNotFoundException keyNotFoundException)
             {
                 statusCode = HttpStatusCode.NotFound;
                 message = keyNotFoundException.Message;
             }
-            // Không đủ quyền thực hiện chức năng
             else if (ex is UnauthorizedAccessException unauthorizedException)
             {
                 statusCode = HttpStatusCode.Forbidden;
                 message = unauthorizedException.Message;
             }
-            // Lỗi nghiệp vụ: trùng lịch, trạng thái không hợp lệ...
             else if (ex is InvalidOperationException invalidOperationException)
             {
                 statusCode = HttpStatusCode.Conflict;
                 message = invalidOperationException.Message;
             }
-            // Dữ liệu đầu vào không hợp lệ
             else if (ex is ArgumentException argumentException)
             {
                 statusCode = HttpStatusCode.BadRequest;
@@ -114,8 +125,7 @@ namespace API.Middleware
                 timestamp = DateTime.UtcNow
             };
 
-            var json = JsonSerializer.Serialize(response);
-
+            string json = JsonSerializer.Serialize(response, JsonOptions);
             return context.Response.WriteAsync(json);
         }
     }

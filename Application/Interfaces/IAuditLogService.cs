@@ -1,7 +1,4 @@
 ﻿using Application.DTOs.AuditLogs;
-using System;
-using System.Collections.Generic;
-using System.Text;
 
 namespace Application.Interfaces
 {
@@ -13,8 +10,6 @@ namespace Application.Interfaces
 
         Task<AuditLogResponse?> GetByIdAsync(
             int id,
-            int? actorUserId,
             CancellationToken cancellationToken);
     }
-
 }

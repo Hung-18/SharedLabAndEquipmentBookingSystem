@@ -3,9 +3,6 @@ using Application.Interfaces;
 using Domain;
 using Domain.Entities;
 using Domain.Interfaces;
-using System;
-using System.Collections.Generic;
-using System.Text;
 
 namespace Application.Services
 {
@@ -33,37 +30,24 @@ namespace Application.Services
             CancellationToken cancellationToken)
         {
             ArgumentNullException.ThrowIfNull(request);
-
-            int actorUserId =
-                ResolveActorUserId(request.ActorUserId);
-
-            await ValidateAdminAsync(
-                actorUserId,
-                cancellationToken);
-
+            await ValidateCurrentAdminAsync(cancellationToken);
             ValidateFilters(request);
 
-            int pageNumber = request.PageNumber <= 0
-                ? 1
-                : request.PageNumber;
-
+            int pageNumber = request.PageNumber <= 0 ? 1 : request.PageNumber;
             int pageSize = request.PageSize <= 0
                 ? DefaultPageSize
-                : Math.Min(
-                    request.PageSize,
-                    MaxPageSize);
+                : Math.Min(request.PageSize, MaxPageSize);
 
-            var result =
-                await _repository.SearchAsync(
-                    request.UserId,
-                    request.ActionType,
-                    request.EntityName,
-                    request.EntityId,
-                    request.From,
-                    request.To,
-                    pageNumber,
-                    pageSize,
-                    cancellationToken);
+            var result = await _repository.SearchAsync(
+                request.UserId,
+                request.ActionType,
+                request.EntityName,
+                request.EntityId,
+                request.From,
+                request.To,
+                pageNumber,
+                pageSize,
+                cancellationToken);
 
             return new PagedAuditLogResponse
             {
@@ -72,138 +56,68 @@ namespace Application.Services
                 PageSize = pageSize,
                 TotalPages = result.TotalCount == 0
                     ? 0
-                    : (int)Math.Ceiling(
-                        result.TotalCount
-                        / (double)pageSize),
-                Items = result.Items
-                    .Select(MapResponse)
-                    .ToList()
+                    : (int)Math.Ceiling(result.TotalCount / (double)pageSize),
+                Items = result.Items.Select(MapResponse).ToList()
             };
         }
 
         public async Task<AuditLogResponse?> GetByIdAsync(
             int id,
-            int? actorUserId,
             CancellationToken cancellationToken)
         {
             if (id <= 0)
-            {
-                throw new ArgumentException(
-                    "AuditLogId phải lớn hơn 0.");
-            }
+                throw new ArgumentException("AuditLogId phải lớn hơn 0.");
 
-            int resolvedActorUserId =
-                ResolveActorUserId(actorUserId);
-
-            await ValidateAdminAsync(
-                resolvedActorUserId,
-                cancellationToken);
-
-            var auditLog = await _repository.GetByIdAsync(
-                id,
-                cancellationToken);
-
-            return auditLog is null
-                ? null
-                : MapResponse(auditLog);
+            await ValidateCurrentAdminAsync(cancellationToken);
+            var auditLog = await _repository.GetByIdAsync(id, cancellationToken);
+            return auditLog is null ? null : MapResponse(auditLog);
         }
 
-        private int ResolveActorUserId(
-            int? actorUserId)
-        {
-            int? resolvedActorId =
-                actorUserId
-                ?? _currentUserService.UserId;
-
-            if (!resolvedActorId.HasValue
-                || resolvedActorId.Value <= 0)
-            {
-                throw new UnauthorizedAccessException(
-                    "Không xác định được người dùng hiện tại.");
-            }
-
-            return resolvedActorId.Value;
-        }
-
-        private async Task ValidateAdminAsync(
-            int actorUserId,
+        private async Task ValidateCurrentAdminAsync(
             CancellationToken cancellationToken)
         {
-            var actor =
-                await _unitOfWork.Users.GetUserByIdAsync(
-                    actorUserId,
-                    cancellationToken);
-
-            if (actor is null)
-            {
-                throw new KeyNotFoundException(
+            int actorUserId = _currentUserService.GetRequiredUserId();
+            var actor = await _unitOfWork.Users.GetUserByIdAsync(
+                actorUserId,
+                cancellationToken)
+                ?? throw new KeyNotFoundException(
                     $"Không tìm thấy người thực hiện có ID {actorUserId}.");
-            }
 
             if (actor.Status != UserStatus.Active)
-            {
                 throw new InvalidOperationException(
-                    "Người thực hiện hiện không ở trạng thái Active.");
-            }
+                    "Tài khoản người thực hiện không ở trạng thái Active.");
 
             if (actor.Role?.RoleName != RoleName.Admin)
-            {
                 throw new UnauthorizedAccessException(
                     "Chỉ Admin được xem nhật ký hệ thống.");
-            }
         }
 
-        private static void ValidateFilters(
-            AuditLogQueryRequest request)
+        private static void ValidateFilters(AuditLogQueryRequest request)
         {
-            if (request.UserId.HasValue
-                && request.UserId.Value <= 0)
-            {
-                throw new ArgumentException(
-                    "UserId phải lớn hơn 0.");
-            }
-
-            if (request.EntityId.HasValue
-                && request.EntityId.Value <= 0)
-            {
-                throw new ArgumentException(
-                    "EntityId phải lớn hơn 0.");
-            }
-
+            if (request.UserId is <= 0)
+                throw new ArgumentException("UserId phải lớn hơn 0.");
+            if (request.EntityId is <= 0)
+                throw new ArgumentException("EntityId phải lớn hơn 0.");
             if (request.ActionType.HasValue
-                && !Enum.IsDefined(
-                    typeof(AuditActionType),
-                    request.ActionType.Value))
-            {
-                throw new ArgumentException(
-                    "ActionType không hợp lệ.");
-            }
-
-            if (request.From.HasValue
-                && request.To.HasValue
+                && !Enum.IsDefined(request.ActionType.Value))
+                throw new ArgumentException("ActionType không hợp lệ.");
+            if (request.From.HasValue && request.To.HasValue
                 && request.From.Value > request.To.Value)
-            {
                 throw new ArgumentException(
                     "Thời gian bắt đầu phải nhỏ hơn thời gian kết thúc.");
-            }
-
             if (request.EntityName?.Trim().Length > 100)
-            {
                 throw new ArgumentException(
                     "EntityName không được vượt quá 100 ký tự.");
-            }
         }
 
-        private static AuditLogResponse MapResponse(
-            AuditLog auditLog)
+        private static AuditLogResponse MapResponse(AuditLog auditLog)
         {
             return new AuditLogResponse
             {
                 AuditLogId = auditLog.AuditLogId,
                 UserId = auditLog.UserId,
                 UserName = auditLog.User?.FullName,
-                ActionType =
-                    auditLog.ActionType.ToString(),
+                ActionType = auditLog.ActionType.ToString(),
                 EntityName = auditLog.EntityName,
                 EntityId = auditLog.EntityId,
                 OldValue = auditLog.OldValue,
@@ -213,5 +127,4 @@ namespace Application.Services
             };
         }
     }
-
 }

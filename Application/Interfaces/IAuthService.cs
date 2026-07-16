@@ -7,7 +7,12 @@ namespace Application.Interfaces
 {
     public interface IAuthService
     {
-        Task<AuthResponseDTO> LoginAsync(LoginRequestDTO loginDTO, CancellationToken cancelation);
-        Task<bool> LogoutAsync(string refreshToken, CancellationToken cancellation);
+        Task<AuthResponseDTO?> LoginAsync(
+            LoginRequestDTO loginDTO,
+            CancellationToken cancellationToken);
+
+        Task<bool> LogoutAsync(
+            string refreshToken,
+            CancellationToken cancellationToken);
     }
 }

@@ -1,12 +1,8 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-
-namespace Application.DTOs.Notifications
+﻿namespace Application.DTOs.Notifications
 {
-    public class NotificationActionRequest
+    // Body rỗng dùng để giữ tương thích nếu frontend vẫn gửi {}.
+    // Actor luôn được lấy từ JWT, không nhận UserId từ client.
+    public sealed class NotificationActionRequest
     {
-        public int ActorUserId { get; set; }
     }
-
 }
