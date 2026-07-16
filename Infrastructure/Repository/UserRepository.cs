@@ -128,5 +128,10 @@ namespace Infrastructure.Repository
         {
             await Context.Users.AddAsync(user, cancellationToken);
         }
+
+        //public async Task<IEnumerable<User>> GetAllUser(int id, CancellationToken cancelation)
+        //{
+        //    return await Context.Users.AsNoTracking.
+        //}
     }
 }

@@ -1,9 +1,12 @@
-﻿using Application.DTOs.Booking;
+﻿using Application.DTOs;
+using Application.DTOs.Booking;
 using Application.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace API.Controllers
 {
+    [Authorize]
     [Route("api/[controller]")]
     [ApiController]
     public class BookingsController : ControllerBase
@@ -17,9 +20,13 @@ namespace API.Controllers
 
         [HttpGet]
         [ProducesResponseType(StatusCodes.Status200OK)]
-        public async Task<IActionResult> GetAll(CancellationToken cancellationToken)
+        public async Task<ActionResult<PageResult<BookingResponse>>> GetAll([FromQuery]int page = 1, [FromQuery]int pageSize = 10, CancellationToken cancellationToken = default)
         {
-            return Ok(await _bookingService.GetAllAsync(cancellationToken));
+            if(page < 1) page = 1;
+            if(pageSize < 10) pageSize = 10;
+            if (pageSize > 50) pageSize = 50;
+            var booking = await _bookingService.PageResultAsync(page, pageSize, cancellationToken);
+            return Ok(booking);
         }
 
         [HttpGet("{id:int}")]
@@ -153,6 +160,8 @@ namespace API.Controllers
             await _bookingService.MarkNoShowAsync(id, request, cancellationToken);
             return NoContent();
         }
+
+        
     }
 
 }

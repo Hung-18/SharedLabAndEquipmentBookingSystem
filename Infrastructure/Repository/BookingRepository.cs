@@ -159,6 +159,23 @@ namespace Infrastructure.Repository
 
             return await query.CountAsync(cancellationToken);
         }
+
+        public async Task<List<Booking>> PageResultAsync(int? userId, int page, int pageSize, CancellationToken cancellationToken)
+        {
+            return await Context.Bookings
+                                .AsNoTracking()
+                                .Where(u => u.UserId == userId)
+                                .OrderByDescending(t => t.CreatedAt)
+                                .Skip((page - 1) * pageSize)
+                                .Take(pageSize)
+                                .ToListAsync();
+        }
+
+        public async Task<int> CountPageAsync(int? userId)
+        {
+            return await Context.Bookings
+                                .CountAsync(c => c.UserId == userId);
+        }
     }
 
 }

@@ -1,6 +1,8 @@
 ﻿using Application.DTOs.AuditLogs;
 using Application.Interfaces;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
+
 
 namespace API.Controllers
 {
@@ -38,6 +40,7 @@ namespace API.Controllers
         }
 
         // GET: api/AuditLogs/1?actorUserId=1
+        [Authorize(Roles = "Admin")]
         [HttpGet("{id:int}")]
         [ProducesResponseType(
             typeof(AuditLogResponse),

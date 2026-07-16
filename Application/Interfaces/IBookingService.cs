@@ -1,4 +1,5 @@
-﻿using Application.DTOs.Booking;
+﻿using Application.DTOs;
+using Application.DTOs.Booking;
 using System;
 using System.Collections.Generic;
 using System.Text;
@@ -24,6 +25,7 @@ namespace Application.Interfaces
         Task CancelAsync(int id, BookingActionRequest request, CancellationToken cancellationToken);
         Task CompleteAsync(int id, BookingActionRequest request, CancellationToken cancellationToken);
         Task MarkNoShowAsync(int id, BookingActionRequest request, CancellationToken cancellationToken);
+        Task<PageResult<BookingResponse>> PageResultAsync(int page, int pageSize, CancellationToken cancelation);
     }
 
 }

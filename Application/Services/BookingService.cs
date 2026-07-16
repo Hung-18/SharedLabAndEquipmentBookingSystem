@@ -1,5 +1,7 @@
-﻿using Application.DTOs.Booking;
+﻿using Application.DTOs;
+using Application.DTOs.Booking;
 using Application.Interfaces;
+using AutoMapper;
 using Domain;
 using Domain.Entities;
 using Domain.Interfaces;
@@ -13,13 +15,19 @@ namespace Application.Services
     {
         private readonly IBookingRepository _repository;
         private readonly IUnitOfWork _unitOfWork;
+        private readonly ICurrentUserService _currentUserService;
+        private readonly IMapper _mapper;
 
         public BookingService(
             IBookingRepository repository,
-            IUnitOfWork unitOfWork)
+            IUnitOfWork unitOfWork,
+            ICurrentUserService currentUserService,
+            IMapper mapper)
         {
             _repository = repository;
             _unitOfWork = unitOfWork;
+            _currentUserService = currentUserService;
+            _mapper = mapper;
         }
 
         public async Task<List<BookingResponse>> GetAllAsync(
@@ -521,6 +529,34 @@ namespace Application.Services
                     EquipmentName = item.Equipment?.EquipmentName,
                     Note = item.Note
                 }).ToList()
+            };
+        }
+
+        public async Task<PageResult<BookingResponse>> PageResultAsync(int page, int pageSize, CancellationToken cancelation)
+        {
+            var user = _currentUserService.UserId;
+            if (user == null)
+            {
+                throw new UnauthorizedAccessException("Please login to continue!");
+            }
+            var booking = await _repository.PageResultAsync(user.Value, page, pageSize, cancelation);
+            var total = await _repository.CountPageAsync(user);
+            var data = booking.Select(b => new BookingResponse
+            {
+                BookingId = b.BookingId,
+                UserId = b.UserId,
+                PurposeType = b.PurposeType.ToString() ?? "N/A",
+                StartTime = b.StartTime,
+                EndTime = b.EndTime,
+                Status = b.Status.ToString(), 
+                CreatedAt = b.CreatedAt
+            }).ToList();
+            return new PageResult<BookingResponse>
+            {
+                Page = page,
+                PageSize = pageSize,
+                Total = total,
+                Data = data
             };
         }
     }

@@ -36,9 +36,9 @@ namespace API.Controllers
             //{
             //    return Unauthorized("Invalid token");
             //}
-            var user = _userService.GetUserByIdServiceAsync(cancelationToken);
+            var user = await _userService.GetUserByIdServiceAsync(cancelationToken);
             if (user == null) return NotFound();
-            return Ok();
+            return Ok(user);
         }
 
         [HttpPost("refresh")]
@@ -68,7 +68,7 @@ namespace API.Controllers
             return Ok("Logged out successfully");
         }
 
-        [Authorize(Roles = "Admin")]
+        //[Authorize(Roles = "Admin")]
         [HttpPost("create-user")]
         public async Task<IActionResult> CreateUser([FromBody] CreateUserDTO createUserDTO, CancellationToken cancelationToken)
         {
@@ -77,7 +77,7 @@ namespace API.Controllers
         }
 
         [HttpPost("forgotpassword")]
-        public async Task<IActionResult> ForgotPassword([FromBody]ForgotPasswordRequest request, CancellationToken cancelationToken)
+        public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordRequest request, CancellationToken cancelationToken)
         {
             var user = await _userService.ForgotPasswordAsync(request.Email, cancelationToken);
             return Ok(new
@@ -85,6 +85,14 @@ namespace API.Controllers
                 Success = true,
                 Message = "Nếu email này tồn tại trong hệ thống, chúng tôi đã gửi liên kết đặt lại mật khẩu cho bạn."
             });
+        }
+
+        [HttpPost("reset-password")]
+        public async Task<IActionResult> PasswordResetAsync(Application.DTOs.Auth.ResetPasswordRequest request, CancellationToken cancelation)
+        {
+            var pass = await _userService.ResetPasswordAsync(request, cancelation);
+            if (!pass) return BadRequest("Token not exist!");
+                return Ok(new {Success  = pass, Message = "Update pass success"});
         }
     }
 }

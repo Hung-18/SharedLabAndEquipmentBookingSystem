@@ -157,21 +157,23 @@ namespace Domain.Entities
             Status = UserStatus.Active;
         }
 
-        public void SetPassword(string pass)
+        public void SetPassword(string passwordHash)
         {
-            if (string.IsNullOrWhiteSpace(pass))
+            if (string.IsNullOrEmpty(passwordHash))
             {
-                throw new ArgumentException(
-                    "Mật khẩu không được để trống.");
+                throw new ArgumentException("password hash can't empty");
             }
 
-            if (pass.Length <= 6)
-            {
-                throw new ArgumentException(
-                    "Mật khẩu phải có nhiều hơn 6 ký tự.");
-            }
+            PasswordHash = passwordHash;
+        }
 
-            PasswordHash = pass;
+        public void Unrestric()
+        {
+            if(Status == UserStatus.Restricted)
+            {
+                Status = UserStatus.Active;
+                RestrictionUntil = null;
+            }
         }
     }
 }

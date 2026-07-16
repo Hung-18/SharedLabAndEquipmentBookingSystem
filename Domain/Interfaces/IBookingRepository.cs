@@ -36,6 +36,9 @@ namespace Domain.Interfaces
             DateTime? from = null,
             DateTime? to = null,
             CancellationToken cancellationToken = default);
+
+        Task<List<Booking>> PageResultAsync(int? userId, int page, int pageSize, CancellationToken cancelation);
+        Task<int> CountPageAsync(int? userId);
         
     }
 

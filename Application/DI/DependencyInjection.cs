@@ -1,6 +1,9 @@
-﻿using Application.Interfaces;
+﻿using Application.DTOs.Auth;
+using Application.Interfaces;
 using Application.Services; // or AutoMapper.Extensions.Microsoft.DependencyInjection
 using AutoMapper;
+using FluentValidation;
+using FluentValidation.AspNetCore;
 using Microsoft.Extensions.DependencyInjection;
 using System;
 using System.Collections.Generic;
@@ -21,7 +24,7 @@ namespace Application.DI
             servicces.AddScoped<IUserService, UserService>();
             servicces.AddScoped<IAuthService, AuthService>();
             servicces.AddScoped<ICurrentUserService, CurrentUserService>();
-           servicces.AddScoped<ILabRoomService, LabRoomService>();
+            servicces.AddScoped<ILabRoomService, LabRoomService>();
             servicces.AddScoped<IEquipmentService, EquipmentService>();
             servicces.AddScoped<IMaintenanceService, MaintenanceService>();
             servicces.AddScoped<IBookingService, BookingService>();
@@ -32,6 +35,8 @@ namespace Application.DI
             servicces.AddScoped<INotificationService, NotificationService>();
             servicces.AddScoped<IAuditLogService, AuditLogService>();
             servicces.AddScoped<IAuditLogWriter, AuditLogWriter>();
+            servicces.AddValidatorsFromAssemblyContaining<ResetPasswordRequestValidate>();
+            servicces.AddFluentValidationAutoValidation();
             return servicces;
         }
     }

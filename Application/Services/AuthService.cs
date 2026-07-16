@@ -37,9 +37,15 @@ namespace Application.Services
                 return null;
             }
 
-            if (user.Status != UserStatus.Active)
+            if (user.Status == UserStatus.Inactive || user.Status == UserStatus.Locked)
             {
                 return null;
+            }
+
+            if(user.Status == UserStatus.Restricted && user.RestrictionUntil <= DateTime.UtcNow && user.RestrictionUntil.HasValue)
+            {
+                user.Unrestric();
+                await _unitOfWork.SaveChangesAsync(cancelationToken);
             }
             var accessToken = _jwtService.GenerateAccessToken(user);
             var refreshToken = _jwtService.GenerateRefreshToken();

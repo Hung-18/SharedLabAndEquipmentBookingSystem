@@ -89,9 +89,9 @@ namespace Application.Services
 
         public async Task<UserDTO> CreateUserAsync(CreateUserDTO createUserDTO, CancellationToken cancelation)
         {
-            var existUser = await _userRepository.IsUsernameExistsAsync(createUserDTO.Email);
+            var existUser = await _userRepository.IsUsernameExistsAsync(createUserDTO.Username);
             if (existUser) throw new InvalidOperationException("UserNawe exist in system");
-            var existEmail = await _userRepository.IsEmailExistsAsync(createUserDTO.Username);
+            var existEmail = await _userRepository.IsEmailExistsAsync(createUserDTO.Email);
             if (existEmail) throw new InvalidOperationException("Email exist in system");
             var hash = BCrypt.Net.BCrypt.HashPassword(createUserDTO.Password);
 
@@ -161,23 +161,17 @@ namespace Application.Services
             var user = await _userRepository.GetByEmailAsync(request.Email);
             if (user == null) return false;
 
-            var expiry = DateTime.UtcNow.AddHours(1);
-            if (expiry <= DateTime.UtcNow)
-            {
-                throw new InvalidOperationException("Invalid time");
-            }
-
             // 3. Update mật khẩu (Gán trực tiếp hoặc dùng phương thức Domain)
             user.SetPassword(BCrypt.Net.BCrypt.HashPassword(request.newPassword));
+
+            // 4. Hủy refresh token cũ
+            await _refreshTokenRepository.RevokeAllByUserIdAsync(user.UserId);
 
             // 4. Xóa token
             await _passwordResetTokenRepository.DeleteAsync(tokenRecord);
 
             // 5. Lưu
             await _unitOfWork.SaveChangesAsync();
-
-
-
             return true;
         }
     }
