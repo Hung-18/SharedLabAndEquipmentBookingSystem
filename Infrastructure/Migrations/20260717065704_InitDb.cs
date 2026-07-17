@@ -180,6 +180,7 @@ namespace Infrastructure.Migrations
                     RoomCode = table.Column<string>(type: "nvarchar(50)", maxLength: 50, nullable: false),
                     Location = table.Column<string>(type: "nvarchar(255)", maxLength: 255, nullable: false),
                     Capacity = table.Column<int>(type: "int", nullable: false),
+                    Description = table.Column<string>(type: "nvarchar(1000)", maxLength: 1000, nullable: true),
                     ImageUrl = table.Column<string>(type: "nvarchar(500)", maxLength: 500, nullable: true),
                     UsageGuideline = table.Column<string>(type: "nvarchar(max)", nullable: true),
                     Status = table.Column<string>(type: "nvarchar(30)", maxLength: 30, nullable: false)
@@ -216,6 +217,28 @@ namespace Infrastructure.Migrations
                     table.CheckConstraint("CK_Notifications_NotificationType", "[NotificationType] IN ('BookingApproved', 'BookingRejected', 'BookingReminder', 'WaitlistAvailable', 'Maintenance', 'Violation', 'System')");
                     table.ForeignKey(
                         name: "FK_Notifications_Users_UserId",
+                        column: x => x.UserId,
+                        principalTable: "Users",
+                        principalColumn: "UserId",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "PasswordResetTokens",
+                columns: table => new
+                {
+                    TokenId = table.Column<int>(type: "int", nullable: false)
+                        .Annotation("SqlServer:Identity", "1, 1"),
+                    Email = table.Column<string>(type: "nvarchar(150)", maxLength: 150, nullable: false),
+                    Token = table.Column<string>(type: "nvarchar(500)", maxLength: 500, nullable: false),
+                    ExpiryDate = table.Column<DateTime>(type: "datetime2", nullable: false),
+                    UserId = table.Column<int>(type: "int", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_PasswordResetTokens", x => x.TokenId);
+                    table.ForeignKey(
+                        name: "FK_PasswordResetTokens_Users_UserId",
                         column: x => x.UserId,
                         principalTable: "Users",
                         principalColumn: "UserId",
@@ -356,7 +379,14 @@ namespace Infrastructure.Migrations
                     EndTime = table.Column<DateTime>(type: "datetime2", nullable: false),
                     MaintenanceCost = table.Column<decimal>(type: "decimal(18,2)", precision: 18, scale: 2, nullable: false),
                     Notes = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                    Status = table.Column<string>(type: "nvarchar(30)", maxLength: 30, nullable: false)
+                    Status = table.Column<string>(type: "nvarchar(30)", maxLength: 30, nullable: false),
+                    RecurrenceType = table.Column<string>(type: "nvarchar(30)", maxLength: 30, nullable: false),
+                    RecurrenceInterval = table.Column<int>(type: "int", nullable: false),
+                    RecurrenceEndDate = table.Column<DateTime>(type: "datetime2", nullable: true),
+                    ParentMaintenanceId = table.Column<int>(type: "int", nullable: true),
+                    NextOccurrenceCreated = table.Column<bool>(type: "bit", nullable: false),
+                    RecurrenceStopped = table.Column<bool>(type: "bit", nullable: false, defaultValue: false),
+                    PreviousResourceStatus = table.Column<int>(type: "int", nullable: true)
                 },
                 constraints: table =>
                 {
@@ -437,12 +467,18 @@ namespace Infrastructure.Migrations
                     ActualCheckin = table.Column<DateTime>(type: "datetime2", nullable: false),
                     ActualCheckout = table.Column<DateTime>(type: "datetime2", nullable: true),
                     IncidentStatus = table.Column<string>(type: "nvarchar(50)", maxLength: 50, nullable: false),
-                    IncidentDescription = table.Column<string>(type: "nvarchar(max)", nullable: true)
+                    IncidentDescription = table.Column<string>(type: "nvarchar(max)", nullable: true),
+                    AffectedEquipmentId = table.Column<int>(type: "int", nullable: true),
+                    IncidentReviewStatus = table.Column<string>(type: "nvarchar(30)", maxLength: 30, nullable: false),
+                    IncidentReviewedById = table.Column<int>(type: "int", nullable: true),
+                    IncidentReviewedAt = table.Column<DateTime>(type: "datetime2", nullable: true),
+                    IncidentReviewNote = table.Column<string>(type: "nvarchar(1000)", maxLength: 1000, nullable: true)
                 },
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_UsageLogs", x => x.LogId);
                     table.CheckConstraint("CK_UsageLogs_Checkin_Checkout", "[ActualCheckout] IS NULL OR [ActualCheckin] <= [ActualCheckout]");
+                    table.CheckConstraint("CK_UsageLogs_IncidentReviewStatus", "[IncidentReviewStatus] IN ('NotRequired', 'Pending', 'Confirmed', 'Rejected')");
                     table.CheckConstraint("CK_UsageLogs_IncidentStatus", "[IncidentStatus] IN ('None', 'DamageReported', 'LateCheckout', 'MissingEquipment', 'Other')");
                     table.ForeignKey(
                         name: "FK_UsageLogs_BookingItems_BookingItemId",
@@ -450,6 +486,18 @@ namespace Infrastructure.Migrations
                         principalTable: "BookingItems",
                         principalColumn: "BookingItemId",
                         onDelete: ReferentialAction.Cascade);
+                    table.ForeignKey(
+                        name: "FK_UsageLogs_Equipments_AffectedEquipmentId",
+                        column: x => x.AffectedEquipmentId,
+                        principalTable: "Equipments",
+                        principalColumn: "EquipmentId",
+                        onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
+                        name: "FK_UsageLogs_Users_IncidentReviewedById",
+                        column: x => x.IncidentReviewedById,
+                        principalTable: "Users",
+                        principalColumn: "UserId",
+                        onDelete: ReferentialAction.Restrict);
                 });
 
             migrationBuilder.InsertData(
@@ -567,8 +615,26 @@ namespace Infrastructure.Migrations
                 columns: new[] { "LabId", "StartTime", "EndTime" });
 
             migrationBuilder.CreateIndex(
+                name: "UX_Maintenances_Parent_StartTime",
+                table: "Maintenances",
+                columns: new[] { "ParentMaintenanceId", "StartTime" },
+                unique: true,
+                filter: "[ParentMaintenanceId] IS NOT NULL");
+
+            migrationBuilder.CreateIndex(
                 name: "IX_Notifications_UserId",
                 table: "Notifications",
+                column: "UserId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_PasswordResetTokens_Token",
+                table: "PasswordResetTokens",
+                column: "Token",
+                unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_PasswordResetTokens_UserId",
+                table: "PasswordResetTokens",
                 column: "UserId");
 
             migrationBuilder.CreateIndex(
@@ -595,9 +661,21 @@ namespace Infrastructure.Migrations
                 unique: true);
 
             migrationBuilder.CreateIndex(
-                name: "IX_UsageLogs_BookingItemId",
+                name: "IX_UsageLogs_AffectedEquipmentId",
                 table: "UsageLogs",
-                column: "BookingItemId");
+                column: "AffectedEquipmentId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_UsageLogs_IncidentReviewedById",
+                table: "UsageLogs",
+                column: "IncidentReviewedById");
+
+            migrationBuilder.CreateIndex(
+                name: "UX_UsageLogs_OneOpenPerBookingItem",
+                table: "UsageLogs",
+                column: "BookingItemId",
+                unique: true,
+                filter: "[ActualCheckout] IS NULL");
 
             migrationBuilder.CreateIndex(
                 name: "IX_Users_DepartmentId",
@@ -627,9 +705,11 @@ namespace Infrastructure.Migrations
                 column: "BookingId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_Violations_UserId",
+                name: "UX_Violations_OneActivePerBookingType",
                 table: "Violations",
-                column: "UserId");
+                columns: new[] { "UserId", "BookingId", "ViolationType" },
+                unique: true,
+                filter: "[Status] = 'Active'");
 
             migrationBuilder.CreateIndex(
                 name: "IX_Waitlists_EquipmentId_RequestedStart_RequestedEnd",
@@ -658,6 +738,9 @@ namespace Infrastructure.Migrations
 
             migrationBuilder.DropTable(
                 name: "Notifications");
+
+            migrationBuilder.DropTable(
+                name: "PasswordResetTokens");
 
             migrationBuilder.DropTable(
                 name: "RefreshTokens");

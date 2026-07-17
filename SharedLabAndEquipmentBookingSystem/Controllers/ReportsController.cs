@@ -44,6 +44,21 @@ namespace API.Controllers
             return Ok(await _service.GetBookingsByDepartmentAsync(from, to, cancellationToken));
         }
 
+        [HttpGet("department-utilization")]
+        [ProducesResponseType(
+            typeof(List<DepartmentUtilizationResponse>),
+            StatusCodes.Status200OK)]
+        public async Task<IActionResult> GetDepartmentUtilization(
+            [FromQuery] DateTime from,
+            [FromQuery] DateTime to,
+            CancellationToken cancellationToken)
+        {
+            return Ok(await _service.GetDepartmentUtilizationAsync(
+                from,
+                to,
+                cancellationToken));
+        }
+
         [HttpGet("bookings/by-purpose")]
         public async Task<IActionResult> GetBookingsByPurpose(
             [FromQuery] DateTime from,
@@ -78,6 +93,19 @@ namespace API.Controllers
             CancellationToken cancellationToken)
         {
             return Ok(await _service.GetMaintenanceCostsByEquipmentAsync(from, to, cancellationToken));
+        }
+
+        [HttpGet("maintenance-history")]
+        [ProducesResponseType(
+            typeof(PagedMaintenanceHistoryResponse),
+            StatusCodes.Status200OK)]
+        public async Task<IActionResult> GetMaintenanceHistory(
+            [FromQuery] MaintenanceHistoryQueryRequest request,
+            CancellationToken cancellationToken)
+        {
+            return Ok(await _service.GetMaintenanceHistoryAsync(
+                request,
+                cancellationToken));
         }
 
         [HttpGet("most-used/labs")]

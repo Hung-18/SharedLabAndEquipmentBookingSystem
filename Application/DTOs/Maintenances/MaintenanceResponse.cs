@@ -25,5 +25,7 @@ namespace Application.DTOs.Maintenances
         public DateTime? RecurrenceEndDate { get; set; }
 
         public int? ParentMaintenanceId { get; set; }
+
+        public bool RecurrenceStopped { get; set; }
     }
 }

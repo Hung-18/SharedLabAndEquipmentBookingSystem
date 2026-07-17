@@ -9,7 +9,7 @@ namespace Application.Interfaces
         Task<List<BookingResponse>> GetByUserIdAsync(int userId, CancellationToken cancellationToken);
         Task<List<BookingResponse>> GetPendingAsync(CancellationToken cancellationToken);
 
-        Task<List<BookingResponse>> GetCalendarAsync(
+        Task<List<CalendarEventResponse>> GetCalendarAsync(
             DateTime from,
             DateTime to,
             int? labId,

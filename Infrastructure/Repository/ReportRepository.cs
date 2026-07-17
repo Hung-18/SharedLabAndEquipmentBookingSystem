@@ -142,6 +142,75 @@ namespace Infrastructure.Repository
                 .ToListAsync(cancellationToken);
         }
 
+        public async Task<(
+            IReadOnlyList<Maintenance> Items,
+            int TotalCount,
+            decimal TotalCost)> GetMaintenanceHistoryAsync(
+                DateTime from,
+                DateTime to,
+                MaintenanceStatus? status,
+                int? labId,
+                int? equipmentId,
+                int? createdById,
+                IReadOnlyCollection<int>? allowedLabIds,
+                int pageNumber,
+                int pageSize,
+                CancellationToken cancellationToken = default)
+        {
+            var query = _context.Maintenances
+                .AsNoTracking()
+                .Include(x => x.LabRoom)
+                .Include(x => x.Equipment)
+                    .ThenInclude(x => x!.LabRoom)
+                .Include(x => x.CreatedBy)
+                .Where(x => x.StartTime < to && x.EndTime > from)
+                .AsQueryable();
+
+            if (status.HasValue)
+                query = query.Where(x => x.Status == status.Value);
+
+            if (labId.HasValue)
+            {
+                query = query.Where(x =>
+                    x.LabId == labId.Value
+                    || (x.Equipment != null
+                        && x.Equipment.LabId == labId.Value));
+            }
+
+            if (equipmentId.HasValue)
+                query = query.Where(x => x.EquipmentId == equipmentId.Value);
+
+            if (createdById.HasValue)
+                query = query.Where(x => x.CreatedById == createdById.Value);
+
+            if (allowedLabIds is not null)
+            {
+                var ids = allowedLabIds.ToArray();
+                query = query.Where(x =>
+                    (x.LabId.HasValue
+                        && ids.Contains(x.LabId.Value))
+                    || (x.Equipment != null
+                        && ids.Contains(x.Equipment.LabId)));
+            }
+
+            int totalCount = await query.CountAsync(cancellationToken);
+
+            decimal totalCost = await query
+                .Where(x => x.Status != MaintenanceStatus.Cancelled)
+                .Select(x => (decimal?)x.MaintenanceCost)
+                .SumAsync(cancellationToken)
+                ?? 0m;
+
+            var items = await query
+                .OrderByDescending(x => x.StartTime)
+                .ThenByDescending(x => x.MaintenanceId)
+                .Skip((pageNumber - 1) * pageSize)
+                .Take(pageSize)
+                .ToListAsync(cancellationToken);
+
+            return (items, totalCount, totalCost);
+        }
+
         public async Task<IReadOnlyList<Violation>> GetViolationsAsync(
             DateTime from,
             DateTime to,

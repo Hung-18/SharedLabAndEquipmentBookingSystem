@@ -62,30 +62,49 @@
             Status = EquipmentStatus.Available;
         }
 
-        public void StartMaintenance()
+        public void StartMaintenance(bool allowBroken = false)
         {
             if (Status == EquipmentStatus.Retired)
                 throw new InvalidOperationException(
                     "Không thể bảo trì thiết bị đã ngừng sử dụng.");
+
             if (Status == EquipmentStatus.InUse)
                 throw new InvalidOperationException(
                     "Không thể bắt đầu bảo trì khi thiết bị đang được sử dụng.");
-            if (Status == EquipmentStatus.Broken)
+
+            if (Status == EquipmentStatus.Maintenance)
                 throw new InvalidOperationException(
-                    "Thiết bị Broken phải được xử lý bằng lịch bảo trì riêng; không tự đổi trạng thái khi bảo trì cả phòng.");
+                    "Thiết bị đang trong trạng thái bảo trì.");
+
+            if (Status == EquipmentStatus.Broken && !allowBroken)
+                throw new InvalidOperationException(
+                    "Thiết bị Broken chỉ được bắt đầu bằng lịch bảo trì trực tiếp cho thiết bị.");
+
             Status = EquipmentStatus.Maintenance;
         }
 
-        public void FinishMaintenance(bool completed)
+        public void FinishMaintenance()
         {
             if (Status != EquipmentStatus.Maintenance)
                 return;
 
-            // Chỉ thiết bị Available mới được StartMaintenance, vì vậy cả
-            // complete và cancel đều phục hồi về Available. Thiết bị Broken
-            // không bị đổi trạng thái khi bảo trì cả phòng.
-            _ = completed;
             Status = EquipmentStatus.Available;
+        }
+
+        public void RestoreAfterCancelledMaintenance(
+            EquipmentStatus previousStatus)
+        {
+            if (Status != EquipmentStatus.Maintenance)
+                return;
+
+            if (previousStatus is not EquipmentStatus.Available
+                and not EquipmentStatus.Broken)
+            {
+                throw new InvalidOperationException(
+                    "Trạng thái trước bảo trì của thiết bị không hợp lệ.");
+            }
+
+            Status = previousStatus;
         }
 
         public void MarkBroken()

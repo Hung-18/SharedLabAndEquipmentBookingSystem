@@ -116,6 +116,14 @@ namespace Domain
         Other = 5
     }
 
+    public enum IncidentReviewStatus
+    {
+        NotRequired = 1,
+        Pending = 2,
+        Confirmed = 3,
+        Rejected = 4
+    }
+
     public enum PriorityRuleStatus
     {
         Active = 1,

@@ -9,6 +9,10 @@ namespace Domain.Interfaces
     {
         Task<IReadOnlyList<Waitlist>> GetByUserIdAsync(int userId, CancellationToken cancellationToken = default);
 
+        Task<IReadOnlyList<Waitlist>> GetByManagerIdAsync(
+            int managerId,
+            CancellationToken cancellationToken = default);
+
         Task<IReadOnlyList<Waitlist>> GetWaitingByResourceAsync(
             int? labId,
             int? equipmentId,
@@ -32,6 +36,13 @@ namespace Domain.Interfaces
 
         Task<bool> HasUserAlreadyWaitingAsync(
             int userId,
+            int? labId,
+            int? equipmentId,
+            DateTime requestedStart,
+            DateTime requestedEnd,
+            CancellationToken cancellationToken = default);
+
+        Task<Waitlist?> GetActiveReservationAsync(
             int? labId,
             int? equipmentId,
             DateTime requestedStart,

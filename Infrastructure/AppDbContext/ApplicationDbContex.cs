@@ -318,22 +318,38 @@ namespace Infrastructure.AppDbContext
             });
         }
 
-        private static void ConfigurePasswordResetToken(ModelBuilder modelBuilder)
+        private static void ConfigurePasswordResetToken(
+     ModelBuilder modelBuilder)
         {
             modelBuilder.Entity<PasswordResetToken>(entity =>
             {
                 entity.ToTable("PasswordResetTokens");
+
                 entity.HasKey(x => x.TokenId);
+
+                entity.Property(x => x.UserId)
+                    .IsRequired();
+
                 entity.Property(x => x.Email)
                     .HasMaxLength(150)
                     .IsRequired();
+
                 entity.Property(x => x.Token)
                     .HasMaxLength(500)
                     .IsRequired();
+
                 entity.Property(x => x.ExpiryDate)
                     .IsRequired();
+
                 entity.HasIndex(x => x.Token)
                     .IsUnique();
+
+                entity.HasIndex(x => x.UserId);
+
+                entity.HasOne(x => x.User)
+                    .WithMany()
+                    .HasForeignKey(x => x.UserId)
+                    .OnDelete(DeleteBehavior.Cascade);
             });
         }
 
@@ -602,6 +618,10 @@ namespace Infrastructure.AppDbContext
                         EnumCheck<UsageIncidentStatus>(nameof(UsageLog.IncidentStatus)));
 
                     table.HasCheckConstraint(
+                        "CK_UsageLogs_IncidentReviewStatus",
+                        EnumCheck<IncidentReviewStatus>(nameof(UsageLog.IncidentReviewStatus)));
+
+                    table.HasCheckConstraint(
                         "CK_UsageLogs_Checkin_Checkout",
                         "[ActualCheckout] IS NULL OR [ActualCheckin] <= [ActualCheckout]");
                 });
@@ -619,6 +639,17 @@ namespace Infrastructure.AppDbContext
                 entity.Property(x => x.IncidentDescription)
                     .HasColumnType("nvarchar(max)");
 
+                entity.Property(x => x.IncidentReviewStatus)
+                    .HasConversion<string>()
+                    .HasMaxLength(30)
+                    .IsRequired();
+
+                entity.Property(x => x.IncidentReviewNote)
+                    .HasMaxLength(1000);
+
+                entity.HasIndex(x => x.AffectedEquipmentId);
+                entity.HasIndex(x => x.IncidentReviewedById);
+
                 entity.HasIndex(x => x.BookingItemId)
                     .IsUnique()
                     .HasFilter("[ActualCheckout] IS NULL")
@@ -628,6 +659,17 @@ namespace Infrastructure.AppDbContext
                     .WithMany(x => x.UsageLogs)
                     .HasForeignKey(x => x.BookingItemId)
                     .OnDelete(DeleteBehavior.Cascade);
+
+                entity.HasOne(x => x.AffectedEquipment)
+                    .WithMany()
+                    .HasForeignKey(x => x.AffectedEquipmentId)
+                    .OnDelete(DeleteBehavior.Restrict);
+
+
+                entity.HasOne(x => x.IncidentReviewedBy)
+                    .WithMany()
+                    .HasForeignKey(x => x.IncidentReviewedById)
+                    .OnDelete(DeleteBehavior.Restrict);
             });
         }
 
@@ -682,6 +724,22 @@ namespace Infrastructure.AppDbContext
 
                 entity.Property(x => x.RecurrenceInterval)
                     .IsRequired();
+
+                entity.Property(x => x.RecurrenceStopped)
+                    .HasDefaultValue(false)
+                    .IsRequired();
+
+                entity.Property(x => x.PreviousResourceStatus);
+
+                entity.HasIndex(x => new
+                {
+                    x.ParentMaintenanceId,
+                    x.StartTime
+                })
+                    .IsUnique()
+                    .HasFilter("[ParentMaintenanceId] IS NOT NULL")
+                    .HasDatabaseName(
+                        "UX_Maintenances_Parent_StartTime");
 
                 entity.HasIndex(x => new { x.LabId, x.StartTime, x.EndTime });
                 entity.HasIndex(x => new { x.EquipmentId, x.StartTime, x.EndTime });
@@ -1145,17 +1203,23 @@ BEGIN
             ON b.[BookingId] = i.[BookingId]
         LEFT JOIN [Equipments] itemEquipment
             ON itemEquipment.[EquipmentId] = i.[EquipmentId]
-        INNER JOIN [Maintenances] m ON
-        (
-            (i.[LabId] IS NOT NULL AND m.[LabId] = i.[LabId])
-            OR
-            (i.[EquipmentId] IS NOT NULL
-             AND m.[EquipmentId] = i.[EquipmentId])
-            OR
-            (i.[EquipmentId] IS NOT NULL
-             AND m.[LabId] = itemEquipment.[LabId])
-        )
+        INNER JOIN [Maintenances] m ON 1 = 1
+        LEFT JOIN [Equipments] maintenanceEquipment
+            ON maintenanceEquipment.[EquipmentId] = m.[EquipmentId]
         WHERE b.[Status] IN ('Pending', 'Approved')
+          AND
+          (
+              (i.[LabId] IS NOT NULL AND m.[LabId] = i.[LabId])
+              OR
+              (i.[EquipmentId] IS NOT NULL
+               AND m.[EquipmentId] = i.[EquipmentId])
+              OR
+              (i.[EquipmentId] IS NOT NULL
+               AND m.[LabId] = itemEquipment.[LabId])
+              OR
+              (i.[LabId] IS NOT NULL
+               AND maintenanceEquipment.[LabId] = i.[LabId])
+          )
           AND m.[Status] IN ('Scheduled', 'InProgress')
           AND b.[StartTime] < m.[EndTime]
           AND b.[EndTime] > m.[StartTime]
@@ -1221,17 +1285,23 @@ BEGIN
             ON item.[BookingId] = b.[BookingId]
         LEFT JOIN [Equipments] itemEquipment
             ON itemEquipment.[EquipmentId] = item.[EquipmentId]
-        INNER JOIN [Maintenances] m ON
-        (
-            (item.[LabId] IS NOT NULL AND m.[LabId] = item.[LabId])
-            OR
-            (item.[EquipmentId] IS NOT NULL
-             AND m.[EquipmentId] = item.[EquipmentId])
-            OR
-            (item.[EquipmentId] IS NOT NULL
-             AND m.[LabId] = itemEquipment.[LabId])
-        )
+        INNER JOIN [Maintenances] m ON 1 = 1
+        LEFT JOIN [Equipments] maintenanceEquipment
+            ON maintenanceEquipment.[EquipmentId] = m.[EquipmentId]
         WHERE b.[Status] IN ('Pending', 'Approved')
+          AND
+          (
+              (item.[LabId] IS NOT NULL AND m.[LabId] = item.[LabId])
+              OR
+              (item.[EquipmentId] IS NOT NULL
+               AND m.[EquipmentId] = item.[EquipmentId])
+              OR
+              (item.[EquipmentId] IS NOT NULL
+               AND m.[LabId] = itemEquipment.[LabId])
+              OR
+              (item.[LabId] IS NOT NULL
+               AND maintenanceEquipment.[LabId] = item.[LabId])
+          )
           AND m.[Status] IN ('Scheduled', 'InProgress')
           AND b.[StartTime] < m.[EndTime]
           AND b.[EndTime] > m.[StartTime]
@@ -1254,6 +1324,8 @@ BEGIN
     (
         SELECT 1
         FROM inserted m
+        LEFT JOIN [Equipments] insertedEquipmentForBooking
+            ON insertedEquipmentForBooking.[EquipmentId] = m.[EquipmentId]
         INNER JOIN [BookingItems] item ON 1 = 1
         LEFT JOIN [Equipments] itemEquipment
             ON itemEquipment.[EquipmentId] = item.[EquipmentId]
@@ -1271,6 +1343,9 @@ BEGIN
               OR
               (m.[EquipmentId] IS NOT NULL
                AND item.[EquipmentId] = m.[EquipmentId])
+              OR
+              (m.[EquipmentId] IS NOT NULL
+               AND item.[LabId] = insertedEquipmentForBooking.[LabId])
           )
     )
     BEGIN

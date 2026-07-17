@@ -19,6 +19,11 @@ namespace Application.Interfaces
             DateTime to,
             CancellationToken cancellationToken = default);
 
+        Task<List<DepartmentUtilizationResponse>> GetDepartmentUtilizationAsync(
+            DateTime from,
+            DateTime to,
+            CancellationToken cancellationToken = default);
+
         Task<List<CategoryCountResponse>> GetBookingsByPurposeAsync(
             DateTime from,
             DateTime to,
@@ -37,6 +42,10 @@ namespace Application.Interfaces
         Task<List<MaintenanceCostResponse>> GetMaintenanceCostsByEquipmentAsync(
             DateTime from,
             DateTime to,
+            CancellationToken cancellationToken = default);
+
+        Task<PagedMaintenanceHistoryResponse> GetMaintenanceHistoryAsync(
+            MaintenanceHistoryQueryRequest request,
             CancellationToken cancellationToken = default);
 
         Task<List<MostUsedResourceResponse>> GetMostUsedLabRoomsAsync(

@@ -24,8 +24,23 @@ namespace Domain.Interfaces
             DateTime? to = null,
             CancellationToken cancellationToken = default);
 
+        Task<IReadOnlyList<UsageLog>> GetByManagerIdAsync(
+            int managerId,
+            CancellationToken cancellationToken = default);
+
+        Task<IReadOnlyList<UsageLog>> GetIncidentLogsByManagerIdAsync(
+            int managerId,
+            DateTime? from = null,
+            DateTime? to = null,
+            CancellationToken cancellationToken = default);
+
         Task<bool> HasOpenLogAsync(
             int bookingItemId,
+            CancellationToken cancellationToken = default);
+
+        Task<bool> HasOpenLogForResourceAsync(
+            int? labId,
+            int? equipmentId,
             CancellationToken cancellationToken = default);
     }
 

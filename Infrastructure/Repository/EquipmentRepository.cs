@@ -66,32 +66,56 @@ namespace Infrastructure.Repository
             DateTime now,
             CancellationToken cancellationToken = default)
         {
+            int? currentLabId = await Context.Equipments
+                .Where(x => x.EquipmentId == equipmentId)
+                .Select(x => (int?)x.LabId)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (!currentLabId.HasValue)
+            {
+                throw new KeyNotFoundException(
+                    $"Không tìm thấy thiết bị có ID {equipmentId}.");
+            }
+
+            int labId = currentLabId.Value;
+
             bool activeBooking = await Context.BookingItems.AnyAsync(item =>
-                item.EquipmentId == equipmentId
-                && item.Booking != null
+                item.Booking != null
                 && item.Booking.Status == BookingStatus.Approved
-                && item.Booking.EndTime > now,
+                && item.Booking.EndTime > now
+                && (item.EquipmentId == equipmentId
+                    || item.LabId == labId),
                 cancellationToken);
-            if (activeBooking) return true;
+
+            if (activeBooking)
+                return true;
 
             bool openUsage = await Context.UsageLogs.AnyAsync(log =>
                 log.ActualCheckout == null
                 && log.BookingItem != null
-                && log.BookingItem.EquipmentId == equipmentId,
+                && (log.BookingItem.EquipmentId == equipmentId
+                    || log.BookingItem.LabId == labId),
                 cancellationToken);
-            if (openUsage) return true;
+
+            if (openUsage)
+                return true;
 
             bool maintenance = await Context.Maintenances.AnyAsync(x =>
-                x.EquipmentId == equipmentId
-                && (x.Status == MaintenanceStatus.Scheduled
-                    || x.Status == MaintenanceStatus.InProgress),
+                (x.Status == MaintenanceStatus.Scheduled
+                    || x.Status == MaintenanceStatus.InProgress)
+                && (x.EquipmentId == equipmentId
+                    || x.LabId == labId),
                 cancellationToken);
-            if (maintenance) return true;
+
+            if (maintenance)
+                return true;
 
             return await Context.Waitlists.AnyAsync(x =>
-                x.EquipmentId == equipmentId
-                && (x.Status == WaitlistStatus.Waiting
-                    || x.Status == WaitlistStatus.Notified),
+                (x.Status == WaitlistStatus.Waiting
+                    || x.Status == WaitlistStatus.Notified
+                    || x.Status == WaitlistStatus.Booked)
+                && (x.EquipmentId == equipmentId
+                    || x.LabId == labId),
                 cancellationToken);
         }
     }

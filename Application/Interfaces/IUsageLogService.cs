@@ -40,6 +40,16 @@ namespace Application.Interfaces
             int logId,
             ReportUsageIncidentRequest request,
             CancellationToken cancellationToken);
+
+        Task<UsageLogResponse> ConfirmIncidentAsync(
+            int logId,
+            ReviewUsageIncidentRequest request,
+            CancellationToken cancellationToken);
+
+        Task<UsageLogResponse> RejectIncidentAsync(
+            int logId,
+            ReviewUsageIncidentRequest request,
+            CancellationToken cancellationToken);
     }
 
 }

@@ -116,5 +116,32 @@ namespace API.Controllers
                 request,
                 cancellationToken));
         }
+
+
+        [Authorize(Roles = "Admin,LabManager")]
+        [HttpPost("{id:int}/incident/confirm")]
+        public async Task<IActionResult> ConfirmIncident(
+            int id,
+            [FromBody] ReviewUsageIncidentRequest request,
+            CancellationToken cancellationToken)
+        {
+            return Ok(await _usageLogService.ConfirmIncidentAsync(
+                id,
+                request,
+                cancellationToken));
+        }
+
+        [Authorize(Roles = "Admin,LabManager")]
+        [HttpPost("{id:int}/incident/reject")]
+        public async Task<IActionResult> RejectIncident(
+            int id,
+            [FromBody] ReviewUsageIncidentRequest request,
+            CancellationToken cancellationToken)
+        {
+            return Ok(await _usageLogService.RejectIncidentAsync(
+                id,
+                request,
+                cancellationToken));
+        }
     }
 }

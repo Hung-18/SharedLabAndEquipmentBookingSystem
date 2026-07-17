@@ -23,6 +23,10 @@ namespace Domain.Interfaces
             int createdById,
             CancellationToken cancellationToken = default);
 
+        Task<IReadOnlyList<Maintenance>> GetByManagerIdAsync(
+            int managerId,
+            CancellationToken cancellationToken = default);
+
         Task<bool> HasMaintenanceConflictAsync(
             int? labId,
             int? equipmentId,
@@ -38,6 +42,15 @@ namespace Domain.Interfaces
             DateTime endTime,
             int? excludeBookingId = null,
             bool includePending = true,
+            CancellationToken cancellationToken = default);
+
+        Task<bool> ExistsOccurrenceAsync(
+            int parentMaintenanceId,
+            DateTime startTime,
+            CancellationToken cancellationToken = default);
+
+        Task<IReadOnlyList<Maintenance>> GetRecurrenceSeriesAsync(
+            int maintenanceId,
             CancellationToken cancellationToken = default);
 
         Task<decimal> GetTotalMaintenanceCostAsync(

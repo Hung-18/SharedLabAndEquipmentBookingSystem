@@ -10,6 +10,10 @@ namespace Application.DTOs.UsageLogs
         public UsageIncidentStatus IncidentStatus { get; set; }
 
         public string IncidentDescription { get; set; } = string.Empty;
+
+        // Bắt buộc khi BookingItem là cả phòng và sự cố liên quan đến
+        // hư hỏng/mất thiết bị. Thiết bị phải thuộc đúng phòng đã đặt.
+        public int? AffectedEquipmentId { get; set; }
     }
 
 }

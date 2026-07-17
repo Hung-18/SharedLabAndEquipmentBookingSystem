@@ -207,6 +207,7 @@ namespace Application.Services
             string tokenHash = HashToken(rawToken);
             await _passwordResetTokenRepository.AddAsync(
                 new PasswordResetToken(
+                    user.UserId,
                     normalizedEmail,
                     tokenHash,
                     DateTime.UtcNow.AddHours(1)),

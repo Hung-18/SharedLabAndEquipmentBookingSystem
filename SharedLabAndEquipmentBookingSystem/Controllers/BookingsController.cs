@@ -52,6 +52,7 @@ namespace API.Controllers
         }
 
         [HttpGet("calendar")]
+        [ProducesResponseType(typeof(List<CalendarEventResponse>), StatusCodes.Status200OK)]
         public async Task<IActionResult> GetCalendar(
             [FromQuery] DateTime from,
             [FromQuery] DateTime to,
