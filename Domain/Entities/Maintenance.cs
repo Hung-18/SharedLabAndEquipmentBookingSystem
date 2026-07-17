@@ -63,6 +63,10 @@
 
         public bool NextOccurrenceCreated { get; private set; }
 
+        public bool RecurrenceStopped { get; private set; }
+
+        public int? PreviousResourceStatus { get; private set; }
+
         public LabRoom? LabRoom { get; private set; }
 
         public Equipment? Equipment { get; private set; }
@@ -81,6 +85,19 @@
             {
                 throw new InvalidOperationException(
                     "Chỉ được sửa lịch bảo trì đang ở trạng thái Scheduled.");
+            }
+
+            bool scheduleOrResourceChanged =
+                LabId != labId
+                || EquipmentId != equipmentId
+                || StartTime != startTime
+                || EndTime != endTime;
+
+            if (NextOccurrenceCreated
+                && scheduleOrResourceChanged)
+            {
+                throw new InvalidOperationException(
+                    "Không thể đổi tài nguyên hoặc thời gian sau khi occurrence tiếp theo đã được sinh.");
             }
 
             Validate(
@@ -108,13 +125,28 @@
             if (!Enum.IsDefined(recurrenceType))
                 throw new ArgumentException("Kiểu lặp bảo trì không hợp lệ.");
 
+            bool recurrenceChanged =
+                RecurrenceType != recurrenceType
+                || RecurrenceInterval != recurrenceInterval
+                || RecurrenceEndDate != recurrenceEndDate
+                || ParentMaintenanceId != parentMaintenanceId;
+
+            if (NextOccurrenceCreated && recurrenceChanged)
+            {
+                throw new InvalidOperationException(
+                    "Không thể đổi quy tắc lặp sau khi occurrence tiếp theo đã được sinh.");
+            }
+
             if (recurrenceType == MaintenanceRecurrenceType.None)
             {
                 RecurrenceType = MaintenanceRecurrenceType.None;
                 RecurrenceInterval = 1;
                 RecurrenceEndDate = null;
                 ParentMaintenanceId = parentMaintenanceId;
-                NextOccurrenceCreated = false;
+
+                if (recurrenceChanged)
+                    NextOccurrenceCreated = false;
+
                 return;
             }
 
@@ -132,7 +164,10 @@
             RecurrenceInterval = recurrenceInterval;
             RecurrenceEndDate = recurrenceEndDate;
             ParentMaintenanceId = parentMaintenanceId;
-            NextOccurrenceCreated = false;
+            RecurrenceStopped = false;
+
+            if (recurrenceChanged)
+                NextOccurrenceCreated = false;
         }
 
         public DateTime GetNextOccurrenceStart()
@@ -155,6 +190,28 @@
             if (RecurrenceType == MaintenanceRecurrenceType.None)
                 throw new InvalidOperationException("Lịch bảo trì không lặp.");
             NextOccurrenceCreated = true;
+        }
+
+        public void StopRecurrence()
+        {
+            if (RecurrenceType == MaintenanceRecurrenceType.None
+                && !ParentMaintenanceId.HasValue)
+            {
+                return;
+            }
+
+            RecurrenceStopped = true;
+        }
+
+        public void CapturePreviousResourceStatus(int statusValue)
+        {
+            if (Status != MaintenanceStatus.Scheduled)
+            {
+                throw new InvalidOperationException(
+                    "Chỉ được ghi trạng thái tài nguyên trước khi bắt đầu bảo trì.");
+            }
+
+            PreviousResourceStatus = statusValue;
         }
 
         public void Start()

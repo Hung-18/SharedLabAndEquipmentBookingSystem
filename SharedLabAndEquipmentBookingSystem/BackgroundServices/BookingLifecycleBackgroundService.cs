@@ -1,4 +1,5 @@
-﻿using Domain;
+﻿using Application.Interfaces;
+using Domain;
 using Domain.Entities;
 using Domain.Interfaces;
 
@@ -53,9 +54,14 @@ namespace API.BackgroundServices
             if (expiredBookings.Count == 0)
                 return;
 
+            var waitlistService =
+                scope.ServiceProvider.GetRequiredService<IWaitlistService>();
+
             await unitOfWork.ExecuteInSerializableTransactionAsync(
                 async ct =>
                 {
+                    var rejectedBookingIds = new List<int>();
+
                     foreach (var booking in expiredBookings)
                     {
                         if (booking.Status != BookingStatus.Pending
@@ -67,6 +73,7 @@ namespace API.BackgroundServices
                         booking.ExpirePending(
                             "Yêu cầu booking đã quá giờ bắt đầu và tự động bị từ chối.");
                         unitOfWork.Bookings.Update(booking);
+                        rejectedBookingIds.Add(booking.BookingId);
 
                         await unitOfWork.Notifications.AddAsync(
                             new Notification(
@@ -75,6 +82,17 @@ namespace API.BackgroundServices
                                 $"Booking #{booking.BookingId} đã quá giờ bắt đầu "
                                 + "nhưng chưa được duyệt nên hệ thống tự động từ chối.",
                                 NotificationType.BookingRejected),
+                            ct);
+                    }
+
+                    // Lưu status Rejected trong transaction hiện tại để
+                    // WaitlistService đọc được trạng thái mới. Chưa commit.
+                    await unitOfWork.SaveChangesAsync(ct);
+
+                    foreach (int bookingId in rejectedBookingIds)
+                    {
+                        await waitlistService.NotifyNextForReleasedBookingAsync(
+                            bookingId,
                             ct);
                     }
 

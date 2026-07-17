@@ -34,11 +34,17 @@ namespace Infrastructure.Repository
             var query = Context.Maintenances
                 .Include(x => x.LabRoom)
                 .Include(x => x.Equipment)
+                    .ThenInclude(x => x!.LabRoom)
                 .Include(x => x.CreatedBy)
                 .AsQueryable();
 
             if (labId.HasValue)
-                query = query.Where(x => x.LabId == labId.Value);
+            {
+                query = query.Where(x =>
+                    x.LabId == labId.Value
+                    || (x.Equipment != null
+                        && x.Equipment.LabId == labId.Value));
+            }
 
             if (equipmentId.HasValue)
                 query = query.Where(x => x.EquipmentId == equipmentId.Value);
@@ -82,6 +88,25 @@ namespace Infrastructure.Repository
                 .ToListAsync(cancellationToken);
         }
 
+        public async Task<IReadOnlyList<Maintenance>> GetByManagerIdAsync(
+            int managerId,
+            CancellationToken cancellationToken = default)
+        {
+            return await Context.Maintenances
+                .Include(x => x.LabRoom)
+                .Include(x => x.Equipment)
+                    .ThenInclude(x => x!.LabRoom)
+                .Include(x => x.CreatedBy)
+                .Where(x =>
+                    (x.LabRoom != null
+                        && x.LabRoom.ManagerId == managerId)
+                    || (x.Equipment != null
+                        && x.Equipment.LabRoom != null
+                        && x.Equipment.LabRoom.ManagerId == managerId))
+                .OrderByDescending(x => x.StartTime)
+                .ToListAsync(cancellationToken);
+        }
+
         public async Task<bool> HasMaintenanceConflictAsync(
             int? labId,
             int? equipmentId,
@@ -105,22 +130,23 @@ namespace Infrastructure.Repository
                     .FirstOrDefaultAsync(cancellationToken);
             }
 
-            return await Context.Maintenances
-                .AnyAsync(
-                    x => blockingStatuses.Contains(x.Status)
-                         && x.StartTime < endTime
-                         && x.EndTime > startTime
-                         && (excludeMaintenanceId == null
-                             || x.MaintenanceId != excludeMaintenanceId.Value)
-                         && (
-                             (labId.HasValue
-                              && x.LabId == labId.Value)
-                             || (equipmentId.HasValue
-                                 && (x.EquipmentId == equipmentId.Value
-                                     || (equipmentLabId.HasValue
-                                         && x.LabId == equipmentLabId.Value)))
-                         ),
-                    cancellationToken);
+            return await Context.Maintenances.AnyAsync(
+                x => blockingStatuses.Contains(x.Status)
+                    && x.StartTime < endTime
+                    && x.EndTime > startTime
+                    && (excludeMaintenanceId == null
+                        || x.MaintenanceId != excludeMaintenanceId.Value)
+                    && (
+                        (labId.HasValue
+                            && (x.LabId == labId.Value
+                                || (x.Equipment != null
+                                    && x.Equipment.LabId == labId.Value)))
+                        || (equipmentId.HasValue
+                            && (x.EquipmentId == equipmentId.Value
+                                || (equipmentLabId.HasValue
+                                    && x.LabId == equipmentLabId.Value)))
+                    ),
+                cancellationToken);
         }
 
         public async Task<bool> HasBookingConflictForMaintenanceAsync(
@@ -136,23 +162,97 @@ namespace Infrastructure.Repository
                 ? new[] { BookingStatus.Pending, BookingStatus.Approved }
                 : new[] { BookingStatus.Approved };
 
-            return await Context.BookingItems
-                .AnyAsync(
-                    x => x.Booking != null
-                         && blockingStatuses.Contains(x.Booking.Status)
-                         && x.Booking.StartTime < endTime
-                         && x.Booking.EndTime > startTime
-                         && (excludeBookingId == null
-                             || x.BookingId != excludeBookingId.Value)
-                         && (
-                             (labId.HasValue
-                              && (x.LabId == labId.Value
-                                  || (x.Equipment != null
-                                      && x.Equipment.LabId == labId.Value)))
-                             || (equipmentId.HasValue
-                                 && x.EquipmentId == equipmentId.Value)
-                         ),
-                    cancellationToken);
+            int? equipmentLabId = null;
+            if (equipmentId.HasValue)
+            {
+                equipmentLabId = await Context.Equipments
+                    .Where(x => x.EquipmentId == equipmentId.Value)
+                    .Select(x => (int?)x.LabId)
+                    .FirstOrDefaultAsync(cancellationToken);
+            }
+
+            return await Context.BookingItems.AnyAsync(
+                x => x.Booking != null
+                    && blockingStatuses.Contains(x.Booking.Status)
+                    && x.Booking.StartTime < endTime
+                    && x.Booking.EndTime > startTime
+                    && (excludeBookingId == null
+                        || x.BookingId != excludeBookingId.Value)
+                    && (
+                        (labId.HasValue
+                            && (x.LabId == labId.Value
+                                || (x.Equipment != null
+                                    && x.Equipment.LabId == labId.Value)))
+                        || (equipmentId.HasValue
+                            && (x.EquipmentId == equipmentId.Value
+                                || (equipmentLabId.HasValue
+                                    && x.LabId == equipmentLabId.Value)))
+                    ),
+                cancellationToken);
+        }
+
+        public async Task<bool> ExistsOccurrenceAsync(
+            int parentMaintenanceId,
+            DateTime startTime,
+            CancellationToken cancellationToken = default)
+        {
+            return await Context.Maintenances.AnyAsync(
+                x => x.ParentMaintenanceId == parentMaintenanceId
+                    && x.StartTime == startTime,
+                cancellationToken);
+        }
+
+        public async Task<IReadOnlyList<Maintenance>> GetRecurrenceSeriesAsync(
+            int maintenanceId,
+            CancellationToken cancellationToken = default)
+        {
+            var candidates = await Context.Maintenances
+                .Include(x => x.LabRoom)
+                .Include(x => x.Equipment)
+                    .ThenInclude(x => x!.LabRoom)
+                .Include(x => x.CreatedBy)
+                .Where(x =>
+                    x.MaintenanceId == maintenanceId
+                    || x.ParentMaintenanceId != null
+                    || x.RecurrenceType != MaintenanceRecurrenceType.None)
+                .ToListAsync(cancellationToken);
+
+            var byId = candidates.ToDictionary(x => x.MaintenanceId);
+            if (!byId.TryGetValue(maintenanceId, out var target))
+            {
+                return Array.Empty<Maintenance>();
+            }
+
+            var root = target;
+            var visitedParents = new HashSet<int>();
+            while (root.ParentMaintenanceId.HasValue
+                && visitedParents.Add(root.MaintenanceId)
+                && byId.TryGetValue(root.ParentMaintenanceId.Value, out var parent))
+            {
+                root = parent;
+            }
+
+            var seriesIds = new HashSet<int> { root.MaintenanceId };
+            bool added;
+            do
+            {
+                added = false;
+                foreach (var candidate in candidates)
+                {
+                    if (candidate.ParentMaintenanceId.HasValue
+                        && seriesIds.Contains(candidate.ParentMaintenanceId.Value)
+                        && seriesIds.Add(candidate.MaintenanceId))
+                    {
+                        added = true;
+                    }
+                }
+            }
+            while (added);
+
+            return candidates
+                .Where(x => seriesIds.Contains(x.MaintenanceId))
+                .OrderBy(x => x.StartTime)
+                .ToList();
         }
 
         public async Task<decimal> GetTotalMaintenanceCostAsync(

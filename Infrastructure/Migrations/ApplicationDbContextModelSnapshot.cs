@@ -302,6 +302,10 @@ namespace Infrastructure.Migrations
                     b.Property<int>("Capacity")
                         .HasColumnType("int");
 
+                    b.Property<string>("Description")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
                     b.Property<string>("ImageUrl")
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
@@ -371,8 +375,33 @@ namespace Infrastructure.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
+                    b.Property<bool>("NextOccurrenceCreated")
+                        .HasColumnType("bit");
+
                     b.Property<string>("Notes")
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<int?>("ParentMaintenanceId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("PreviousResourceStatus")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("RecurrenceEndDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("RecurrenceInterval")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("RecurrenceStopped")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
+
+                    b.Property<string>("RecurrenceType")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
 
                     b.Property<DateTime>("StartTime")
                         .HasColumnType("datetime2");
@@ -385,6 +414,11 @@ namespace Infrastructure.Migrations
                     b.HasKey("MaintenanceId");
 
                     b.HasIndex("CreatedById");
+
+                    b.HasIndex("ParentMaintenanceId", "StartTime")
+                        .IsUnique()
+                        .HasDatabaseName("UX_Maintenances_Parent_StartTime")
+                        .HasFilter("[ParentMaintenanceId] IS NOT NULL");
 
                     b.HasIndex("EquipmentId", "StartTime", "EndTime");
 
@@ -468,11 +502,22 @@ namespace Infrastructure.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
 
+<<<<<<< HEAD
+=======
+                    b.Property<int>("UserId")
+                        .HasColumnType("int");
+
+>>>>>>> origin/feature-2
                     b.HasKey("TokenId");
 
                     b.HasIndex("Token")
                         .IsUnique();
 
+<<<<<<< HEAD
+=======
+                    b.HasIndex("UserId");
+
+>>>>>>> origin/feature-2
                     b.ToTable("PasswordResetTokens", (string)null);
                 });
 
@@ -657,11 +702,29 @@ namespace Infrastructure.Migrations
                     b.Property<DateTime?>("ActualCheckout")
                         .HasColumnType("datetime2");
 
+                    b.Property<int?>("AffectedEquipmentId")
+                        .HasColumnType("int");
+
                     b.Property<int>("BookingItemId")
                         .HasColumnType("int");
 
                     b.Property<string>("IncidentDescription")
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("IncidentReviewNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("IncidentReviewStatus")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<DateTime?>("IncidentReviewedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int?>("IncidentReviewedById")
+                        .HasColumnType("int");
 
                     b.Property<string>("IncidentStatus")
                         .IsRequired()
@@ -670,11 +733,20 @@ namespace Infrastructure.Migrations
 
                     b.HasKey("LogId");
 
-                    b.HasIndex("BookingItemId");
+                    b.HasIndex("AffectedEquipmentId");
+
+                    b.HasIndex("BookingItemId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_UsageLogs_OneOpenPerBookingItem")
+                        .HasFilter("[ActualCheckout] IS NULL");
+
+                    b.HasIndex("IncidentReviewedById");
 
                     b.ToTable("UsageLogs", null, t =>
                         {
                             t.HasCheckConstraint("CK_UsageLogs_Checkin_Checkout", "[ActualCheckout] IS NULL OR [ActualCheckin] <= [ActualCheckout]");
+
+                            t.HasCheckConstraint("CK_UsageLogs_IncidentReviewStatus", "[IncidentReviewStatus] IN ('NotRequired', 'Pending', 'Confirmed', 'Rejected')");
 
                             t.HasCheckConstraint("CK_UsageLogs_IncidentStatus", "[IncidentStatus] IN ('None', 'DamageReported', 'LateCheckout', 'MissingEquipment', 'Other')");
                         });
@@ -833,7 +905,14 @@ namespace Infrastructure.Migrations
 
                     b.HasIndex("BookingId");
 
+<<<<<<< HEAD
                     b.HasIndex("UserId");
+=======
+                    b.HasIndex("UserId", "BookingId", "ViolationType")
+                        .IsUnique()
+                        .HasDatabaseName("UX_Violations_OneActivePerBookingType")
+                        .HasFilter("[Status] = 'Active'");
+>>>>>>> origin/feature-2
 
                     b.ToTable("Violations", null, t =>
                         {
@@ -964,6 +1043,17 @@ namespace Infrastructure.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("Domain.Entities.PasswordResetToken", b =>
+                {
+                    b.HasOne("Domain.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("Domain.Entities.RefreshToken", b =>
                 {
                     b.HasOne("Domain.Entities.User", "User")
@@ -977,13 +1067,27 @@ namespace Infrastructure.Migrations
 
             modelBuilder.Entity("Domain.Entities.UsageLog", b =>
                 {
+                    b.HasOne("Domain.Entities.Equipment", "AffectedEquipment")
+                        .WithMany()
+                        .HasForeignKey("AffectedEquipmentId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("Domain.Entities.BookingItem", "BookingItem")
                         .WithMany("UsageLogs")
                         .HasForeignKey("BookingItemId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("Domain.Entities.User", "IncidentReviewedBy")
+                        .WithMany()
+                        .HasForeignKey("IncidentReviewedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("AffectedEquipment");
+
                     b.Navigation("BookingItem");
+
+                    b.Navigation("IncidentReviewedBy");
                 });
 
             modelBuilder.Entity("Domain.Entities.User", b =>

@@ -153,5 +153,19 @@ namespace API.Controllers
 
             return NoContent();
         }
+
+
+        [Authorize(Roles = "Admin,LabManager")]
+        [HttpPost("{id:int}/cancel-series")]
+        public async Task<IActionResult> CancelSeries(
+            int id,
+            CancellationToken cancellationToken)
+        {
+            await _maintenanceService.CancelSeriesAsync(
+                id,
+                cancellationToken);
+
+            return NoContent();
+        }
     }
 }

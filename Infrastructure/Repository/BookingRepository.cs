@@ -133,14 +133,31 @@ namespace Infrastructure.Repository
 
             if (labId.HasValue)
             {
+                int resolvedLabId = labId.Value;
                 query = query.Where(x =>
-                    x.BookingItems.Any(item => item.LabId == labId.Value));
+                    x.BookingItems.Any(item =>
+                        item.LabId == resolvedLabId
+                        || (item.Equipment != null
+                            && item.Equipment.LabId == resolvedLabId)));
             }
 
             if (equipmentId.HasValue)
             {
+                int resolvedEquipmentId = equipmentId.Value;
+                int? equipmentLabId = await Context.Equipments
+                    .Where(x => x.EquipmentId == resolvedEquipmentId)
+                    .Select(x => (int?)x.LabId)
+                    .FirstOrDefaultAsync(cancellationToken);
+
+                if (!equipmentLabId.HasValue)
+                {
+                    return Array.Empty<Booking>();
+                }
+
                 query = query.Where(x =>
-                    x.BookingItems.Any(item => item.EquipmentId == equipmentId.Value));
+                    x.BookingItems.Any(item =>
+                        item.EquipmentId == resolvedEquipmentId
+                        || item.LabId == equipmentLabId.Value));
             }
 
             return await query

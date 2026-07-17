@@ -28,26 +28,13 @@ namespace Application.Services
         public async Task<List<MaintenanceResponse>> GetAllAsync(
             CancellationToken cancellationToken)
         {
-            var actor = await GetCurrentActiveUserAsync(cancellationToken);
-            var maintenances = await _repository.GetAllAsync(cancellationToken);
-
-            if (actor.Role?.RoleName == RoleName.LabManager)
-            {
-                var filtered = new List<Maintenance>();
-                foreach (var maintenance in maintenances)
-                {
-                    if (await CanManageResourceAsync(
+            var actor = await GetAuthenticatedUserAsync(cancellationToken);
+            IReadOnlyList<Maintenance> maintenances =
+                actor.Role?.RoleName == RoleName.LabManager
+                    ? await _repository.GetByManagerIdAsync(
                         actor.UserId,
-                        maintenance.LabId,
-                        maintenance.EquipmentId,
-                        cancellationToken))
-                    {
-                        filtered.Add(maintenance);
-                    }
-                }
-
-                maintenances = filtered;
-            }
+                        cancellationToken)
+                    : await _repository.GetAllAsync(cancellationToken);
 
             return maintenances.Select(MapResponse).ToList();
         }
@@ -56,7 +43,7 @@ namespace Application.Services
             int id,
             CancellationToken cancellationToken)
         {
-            var actor = await GetCurrentActiveUserAsync(cancellationToken);
+            var actor = await GetAuthenticatedUserAsync(cancellationToken);
             var maintenance = await _repository.GetDetailAsync(id, cancellationToken);
 
             if (maintenance is null)
@@ -80,7 +67,7 @@ namespace Application.Services
             int labId,
             CancellationToken cancellationToken)
         {
-            await GetCurrentActiveUserAsync(cancellationToken);
+            await GetAuthenticatedUserAsync(cancellationToken);
 
             var labRoom = await _unitOfWork.LabRooms.GetByIdAsync(labId, cancellationToken)
                 ?? throw new KeyNotFoundException($"Không tìm thấy phòng lab có ID {labId}.");
@@ -97,7 +84,7 @@ namespace Application.Services
             int equipmentId,
             CancellationToken cancellationToken)
         {
-            await GetCurrentActiveUserAsync(cancellationToken);
+            await GetAuthenticatedUserAsync(cancellationToken);
 
             var equipment = await _unitOfWork.Equipments.GetByIdAsync(
                 equipmentId,
@@ -250,23 +237,53 @@ namespace Application.Services
         {
             var actor = await GetCurrentActiveUserAsync(cancellationToken);
             EnsureManagerOrAdmin(actor);
-            var maintenance = await GetMaintenanceOrThrowAsync(id, cancellationToken);
-            await EnsureCanManageResourceAsync(
-                actor,
-                maintenance.LabId,
-                maintenance.EquipmentId,
-                cancellationToken);
-
-            var oldValue = Snapshot(maintenance);
 
             await _unitOfWork.ExecuteInSerializableTransactionAsync(
                 async ct =>
                 {
-                    maintenance.Start();
+                    var maintenance = await GetMaintenanceOrThrowAsync(id, ct);
+                    await EnsureCanManageResourceAsync(
+                        actor,
+                        maintenance.LabId,
+                        maintenance.EquipmentId,
+                        ct);
+
+                    DateTime now = DateTime.UtcNow;
+
+                    if (now < maintenance.StartTime)
+                    {
+                        throw new InvalidOperationException(
+                            "Chưa đến thời gian bắt đầu lịch bảo trì.");
+                    }
+
+                    if (now >= maintenance.EndTime)
+                    {
+                        throw new InvalidOperationException(
+                            "Không thể bắt đầu lịch bảo trì đã hết hạn.");
+                    }
+
+                    bool resourceIsInUse =
+                        await _unitOfWork.UsageLogs.HasOpenLogForResourceAsync(
+                            maintenance.LabId,
+                            maintenance.EquipmentId,
+                            ct);
+
+                    if (resourceIsInUse)
+                    {
+                        throw new InvalidOperationException(
+                            "Không thể bắt đầu bảo trì khi tài nguyên đang có lượt sử dụng chưa checkout.");
+                    }
+
+                    var oldValue = Snapshot(maintenance);
+
                     await SetResourceMaintenanceStatusAsync(maintenance, ct);
+                    maintenance.Start();
                     _repository.Update(maintenance);
 
-                    await AddMaintenanceNotificationAsync(maintenance, "đã bắt đầu", ct);
+                    await AddMaintenanceNotificationAsync(
+                        maintenance,
+                        "đã bắt đầu",
+                        ct);
 
                     await _auditLogWriter.WriteAsync(
                         actorUserId: actor.UserId,
@@ -288,23 +305,30 @@ namespace Application.Services
         {
             var actor = await GetCurrentActiveUserAsync(cancellationToken);
             EnsureManagerOrAdmin(actor);
-            var maintenance = await GetMaintenanceOrThrowAsync(id, cancellationToken);
-            await EnsureCanManageResourceAsync(
-                actor,
-                maintenance.LabId,
-                maintenance.EquipmentId,
-                cancellationToken);
-
-            var oldValue = Snapshot(maintenance);
 
             await _unitOfWork.ExecuteInSerializableTransactionAsync(
                 async ct =>
                 {
+                    var maintenance = await GetMaintenanceOrThrowAsync(id, ct);
+                    await EnsureCanManageResourceAsync(
+                        actor,
+                        maintenance.LabId,
+                        maintenance.EquipmentId,
+                        ct);
+
+                    var oldValue = Snapshot(maintenance);
+
                     maintenance.Complete();
-                    await RestoreResourceStatusAsync(maintenance, completed: true, ct);
+                    await RestoreResourceStatusAsync(
+                        maintenance,
+                        completed: true,
+                        ct);
                     _repository.Update(maintenance);
 
-                    await AddMaintenanceNotificationAsync(maintenance, "đã hoàn thành", ct);
+                    await AddMaintenanceNotificationAsync(
+                        maintenance,
+                        "đã hoàn thành",
+                        ct);
 
                     await _auditLogWriter.WriteAsync(
                         actorUserId: actor.UserId,
@@ -326,26 +350,36 @@ namespace Application.Services
         {
             var actor = await GetCurrentActiveUserAsync(cancellationToken);
             EnsureManagerOrAdmin(actor);
-            var maintenance = await GetMaintenanceOrThrowAsync(id, cancellationToken);
-            await EnsureCanManageResourceAsync(
-                actor,
-                maintenance.LabId,
-                maintenance.EquipmentId,
-                cancellationToken);
-
-            var wasInProgress = maintenance.Status == MaintenanceStatus.InProgress;
-            var oldValue = Snapshot(maintenance);
 
             await _unitOfWork.ExecuteInSerializableTransactionAsync(
                 async ct =>
                 {
+                    var maintenance = await GetMaintenanceOrThrowAsync(id, ct);
+                    await EnsureCanManageResourceAsync(
+                        actor,
+                        maintenance.LabId,
+                        maintenance.EquipmentId,
+                        ct);
+
+                    bool wasInProgress =
+                        maintenance.Status == MaintenanceStatus.InProgress;
+                    var oldValue = Snapshot(maintenance);
+
                     maintenance.Cancel();
 
                     if (wasInProgress)
-                        await RestoreResourceStatusAsync(maintenance, completed: false, ct);
+                    {
+                        await RestoreResourceStatusAsync(
+                            maintenance,
+                            completed: false,
+                            ct);
+                    }
 
                     _repository.Update(maintenance);
-                    await AddMaintenanceNotificationAsync(maintenance, "đã bị hủy", ct);
+                    await AddMaintenanceNotificationAsync(
+                        maintenance,
+                        "đã bị hủy; các kỳ lặp sau vẫn tiếp tục",
+                        ct);
 
                     await _auditLogWriter.WriteAsync(
                         actorUserId: actor.UserId,
@@ -353,8 +387,90 @@ namespace Application.Services
                         entityName: nameof(Maintenance),
                         entityId: maintenance.MaintenanceId,
                         oldValue: oldValue,
-                        newValue: Snapshot(maintenance),
+                        newValue: new
+                        {
+                            Maintenance = Snapshot(maintenance),
+                            Action = "CancelOccurrence",
+                            RecurrenceContinues =
+                                maintenance.RecurrenceType
+                                    != MaintenanceRecurrenceType.None
+                        },
                         cancellationToken: ct);
+
+                    await _unitOfWork.SaveChangesAsync(ct);
+                },
+                cancellationToken);
+        }
+
+        public async Task CancelSeriesAsync(
+            int id,
+            CancellationToken cancellationToken)
+        {
+            var actor = await GetCurrentActiveUserAsync(cancellationToken);
+            EnsureManagerOrAdmin(actor);
+
+            await _unitOfWork.ExecuteInSerializableTransactionAsync(
+                async ct =>
+                {
+                    var target = await GetMaintenanceOrThrowAsync(id, ct);
+                    await EnsureCanManageResourceAsync(
+                        actor,
+                        target.LabId,
+                        target.EquipmentId,
+                        ct);
+
+                    var series = await _repository.GetRecurrenceSeriesAsync(
+                        id,
+                        ct);
+
+                    if (series.Count == 0)
+                    {
+                        throw new KeyNotFoundException(
+                            $"Không tìm thấy chuỗi bảo trì chứa lịch ID {id}.");
+                    }
+
+                    foreach (var maintenance in series)
+                    {
+                        var oldValue = Snapshot(maintenance);
+                        bool wasInProgress =
+                            maintenance.Status == MaintenanceStatus.InProgress;
+
+                        if (maintenance.Status is MaintenanceStatus.Scheduled
+                            or MaintenanceStatus.InProgress)
+                        {
+                            maintenance.Cancel();
+
+                            if (wasInProgress)
+                            {
+                                await RestoreResourceStatusAsync(
+                                    maintenance,
+                                    completed: false,
+                                    ct);
+                            }
+                        }
+
+                        maintenance.StopRecurrence();
+                        _repository.Update(maintenance);
+
+                        await _auditLogWriter.WriteAsync(
+                            actorUserId: actor.UserId,
+                            actionType: AuditActionType.Update,
+                            entityName: nameof(Maintenance),
+                            entityId: maintenance.MaintenanceId,
+                            oldValue: oldValue,
+                            newValue: new
+                            {
+                                Maintenance = Snapshot(maintenance),
+                                Action = "CancelRecurringSeries",
+                                RequestedFromMaintenanceId = id
+                            },
+                            cancellationToken: ct);
+                    }
+
+                    await AddMaintenanceNotificationAsync(
+                        target,
+                        "và toàn bộ chuỗi định kỳ đã bị hủy",
+                        ct);
 
                     await _unitOfWork.SaveChangesAsync(ct);
                 },
@@ -373,18 +489,13 @@ namespace Application.Services
                     ?? throw new KeyNotFoundException(
                         $"Không tìm thấy phòng lab có ID {maintenance.LabId.Value}.");
 
+                maintenance.CapturePreviousResourceStatus((int)lab.Status);
                 lab.StartMaintenance();
                 _unitOfWork.LabRooms.Update(lab);
 
-                foreach (var equipment in lab.Equipments)
-                {
-                    if (equipment.Status is EquipmentStatus.Retired
-                        or EquipmentStatus.Broken)
-                        continue;
-
-                    equipment.StartMaintenance();
-                    _unitOfWork.Equipments.Update(equipment);
-                }
+                // Booking/maintenance conflict của phòng đã khóa toàn bộ thiết bị
+                // trong phòng. Không đổi hàng loạt trạng thái thiết bị để tránh làm
+                // mất trạng thái Broken/Unavailable riêng của từng thiết bị.
             }
             else
             {
@@ -394,7 +505,8 @@ namespace Application.Services
                     ?? throw new KeyNotFoundException(
                         $"Không tìm thấy thiết bị có ID {maintenance.EquipmentId.Value}.");
 
-                equipment.StartMaintenance();
+                maintenance.CapturePreviousResourceStatus((int)equipment.Status);
+                equipment.StartMaintenance(allowBroken: true);
                 _unitOfWork.Equipments.Update(equipment);
             }
         }
@@ -412,15 +524,20 @@ namespace Application.Services
                     ?? throw new KeyNotFoundException(
                         $"Không tìm thấy phòng lab có ID {maintenance.LabId.Value}.");
 
-                lab.FinishMaintenance();
-                _unitOfWork.LabRooms.Update(lab);
-
-                foreach (var equipment in lab.Equipments
-                    .Where(x => x.Status == EquipmentStatus.Maintenance))
+                if (completed)
                 {
-                    equipment.FinishMaintenance(completed);
-                    _unitOfWork.Equipments.Update(equipment);
+                    lab.FinishMaintenance();
                 }
+                else
+                {
+                    var previousStatus = maintenance.PreviousResourceStatus.HasValue
+                        ? (LabRoomStatus)maintenance.PreviousResourceStatus.Value
+                        : LabRoomStatus.Unavailable;
+
+                    lab.RestoreAfterCancelledMaintenance(previousStatus);
+                }
+
+                _unitOfWork.LabRooms.Update(lab);
             }
             else
             {
@@ -430,7 +547,19 @@ namespace Application.Services
                     ?? throw new KeyNotFoundException(
                         $"Không tìm thấy thiết bị có ID {maintenance.EquipmentId.Value}.");
 
-                equipment.FinishMaintenance(completed);
+                if (completed)
+                {
+                    equipment.FinishMaintenance();
+                }
+                else
+                {
+                    var previousStatus = maintenance.PreviousResourceStatus.HasValue
+                        ? (EquipmentStatus)maintenance.PreviousResourceStatus.Value
+                        : EquipmentStatus.Broken;
+
+                    equipment.RestoreAfterCancelledMaintenance(previousStatus);
+                }
+
                 _unitOfWork.Equipments.Update(equipment);
             }
         }
@@ -478,15 +607,37 @@ namespace Application.Services
             return lab?.ManagerId;
         }
 
-        private async Task<User> GetCurrentActiveUserAsync(
+        private async Task<User> GetAuthenticatedUserAsync(
             CancellationToken cancellationToken)
         {
             var userId = _currentUserService.GetRequiredUserId();
-            var user = await _unitOfWork.Users.GetUserByIdAsync(userId, cancellationToken)
-                ?? throw new KeyNotFoundException($"Không tìm thấy người dùng có ID {userId}.");
+            var user = await _unitOfWork.Users.GetUserByIdAsync(
+                userId,
+                cancellationToken)
+                ?? throw new KeyNotFoundException(
+                    $"Không tìm thấy người dùng có ID {userId}.");
+
+            user.TryUnlockExpiredRestriction(DateTime.UtcNow);
+
+            if (user.Status is UserStatus.Inactive or UserStatus.Locked)
+            {
+                throw new InvalidOperationException(
+                    "Tài khoản không được phép thao tác.");
+            }
+
+            return user;
+        }
+
+        private async Task<User> GetCurrentActiveUserAsync(
+            CancellationToken cancellationToken)
+        {
+            var user = await GetAuthenticatedUserAsync(cancellationToken);
 
             if (user.Status != UserStatus.Active)
-                throw new InvalidOperationException("Tài khoản không ở trạng thái hoạt động.");
+            {
+                throw new InvalidOperationException(
+                    "Tài khoản phải ở trạng thái Active.");
+            }
 
             return user;
         }
@@ -657,7 +808,9 @@ namespace Application.Services
                 RecurrenceType = maintenance.RecurrenceType.ToString(),
                 maintenance.RecurrenceInterval,
                 maintenance.RecurrenceEndDate,
-                maintenance.ParentMaintenanceId
+                maintenance.ParentMaintenanceId,
+                maintenance.RecurrenceStopped,
+                maintenance.PreviousResourceStatus
             };
         }
 
@@ -674,7 +827,8 @@ namespace Application.Services
                 RecurrenceType = maintenance.RecurrenceType.ToString(),
                 RecurrenceInterval = maintenance.RecurrenceInterval,
                 RecurrenceEndDate = maintenance.RecurrenceEndDate,
-                ParentMaintenanceId = maintenance.ParentMaintenanceId
+                ParentMaintenanceId = maintenance.ParentMaintenanceId,
+                RecurrenceStopped = maintenance.RecurrenceStopped
             };
         }
 
@@ -694,7 +848,8 @@ namespace Application.Services
                 RecurrenceType = maintenance.RecurrenceType.ToString(),
                 RecurrenceInterval = maintenance.RecurrenceInterval,
                 RecurrenceEndDate = maintenance.RecurrenceEndDate,
-                ParentMaintenanceId = maintenance.ParentMaintenanceId
+                ParentMaintenanceId = maintenance.ParentMaintenanceId,
+                RecurrenceStopped = maintenance.RecurrenceStopped
             };
         }
     }

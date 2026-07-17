@@ -42,5 +42,9 @@ namespace Application.Interfaces
         Task CancelAsync(
             int id,
             CancellationToken cancellationToken);
+
+        Task CancelSeriesAsync(
+            int id,
+            CancellationToken cancellationToken);
     }
 }

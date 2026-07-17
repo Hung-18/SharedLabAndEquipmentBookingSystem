@@ -79,6 +79,15 @@ namespace Infrastructure.Repository
         {
             ArgumentNullException.ThrowIfNull(operation);
 
+            // Cho phép service con tham gia transaction hiện tại thay vì mở
+            // transaction lồng nhau trên cùng DbContext. Nếu service con lỗi,
+            // exception sẽ được đẩy lên để transaction ngoài rollback toàn bộ.
+            if (_context.Database.CurrentTransaction is not null)
+            {
+                await operation(cancellationToken);
+                return;
+            }
+
             await using var transaction =
                 await _context.Database.BeginTransactionAsync(
                     isolationLevel,

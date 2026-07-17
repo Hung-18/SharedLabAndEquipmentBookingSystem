@@ -72,6 +72,11 @@
             if (Status == LabRoomStatus.Inactive)
                 throw new InvalidOperationException(
                     "Không thể bảo trì phòng lab đã ngừng hoạt động.");
+
+            if (Status == LabRoomStatus.Maintenance)
+                throw new InvalidOperationException(
+                    "Phòng lab đang trong trạng thái bảo trì.");
+
             Status = LabRoomStatus.Maintenance;
         }
 
@@ -79,6 +84,22 @@
         {
             if (Status == LabRoomStatus.Maintenance)
                 Status = LabRoomStatus.Available;
+        }
+
+        public void RestoreAfterCancelledMaintenance(
+            LabRoomStatus previousStatus)
+        {
+            if (Status != LabRoomStatus.Maintenance)
+                return;
+
+            if (previousStatus is not LabRoomStatus.Available
+                and not LabRoomStatus.Unavailable)
+            {
+                throw new InvalidOperationException(
+                    "Trạng thái trước bảo trì của phòng lab không hợp lệ.");
+            }
+
+            Status = previousStatus;
         }
 
         public void MarkUnavailable()

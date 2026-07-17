@@ -1,4 +1,5 @@
-﻿using Domain.Entities;
+﻿using Domain;
+using Domain.Entities;
 
 namespace Domain.Interfaces
 {
@@ -29,6 +30,21 @@ namespace Domain.Interfaces
             DateTime to,
             IReadOnlyCollection<int>? allowedLabIds,
             CancellationToken cancellationToken = default);
+
+        Task<(
+            IReadOnlyList<Maintenance> Items,
+            int TotalCount,
+            decimal TotalCost)> GetMaintenanceHistoryAsync(
+                DateTime from,
+                DateTime to,
+                MaintenanceStatus? status,
+                int? labId,
+                int? equipmentId,
+                int? createdById,
+                IReadOnlyCollection<int>? allowedLabIds,
+                int pageNumber,
+                int pageSize,
+                CancellationToken cancellationToken = default);
 
         Task<IReadOnlyList<Violation>> GetViolationsAsync(
             DateTime from,

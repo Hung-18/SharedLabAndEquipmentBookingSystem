@@ -13,6 +13,12 @@ namespace Domain.Interfaces
 
         Task<IReadOnlyList<Violation>> GetActiveByUserIdAsync(int userId, CancellationToken cancellationToken = default);
 
+        Task<IReadOnlyList<Violation>> GetByManagerIdAsync(
+            int managerId,
+            int? userId = null,
+            bool activeOnly = false,
+            CancellationToken cancellationToken = default);
+
         Task<int> GetTotalActivePenaltyPointsAsync(int userId, CancellationToken cancellationToken = default);
 
         Task<int> CountActiveViolationsAsync(int userId, CancellationToken cancellationToken = default);

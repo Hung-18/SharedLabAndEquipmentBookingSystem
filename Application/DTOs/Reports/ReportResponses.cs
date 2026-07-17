@@ -15,6 +15,27 @@
         public double UtilizationRate { get; set; }
     }
 
+    public class DepartmentUtilizationResponse
+    {
+        public int DepartmentId { get; set; }
+        public string DepartmentName { get; set; } = string.Empty;
+        public int BookingCount { get; set; }
+        public double ReservedHours { get; set; }
+        public int UsageCount { get; set; }
+        public double ActualUsageHours { get; set; }
+
+        // Tổng giờ khả dụng thực tế của các tài nguyên mà khoa/bộ môn
+        // đã đặt trong kỳ, sau khi trừ thời gian maintenance khóa tài nguyên.
+        public double AvailableResourceHours { get; set; }
+
+        // Tỷ lệ sử dụng thật = giờ sử dụng thực tế / giờ tài nguyên khả dụng.
+        public double UtilizationRate { get; set; }
+
+        // Tỷ trọng giờ sử dụng của khoa trong tổng giờ sử dụng toàn hệ thống.
+        // Đây là chỉ số khác với UtilizationRate.
+        public double UsageSharePercentage { get; set; }
+    }
+
     public class CategoryCountResponse
     {
         public string Key { get; set; } = string.Empty;
@@ -76,6 +97,7 @@
         public string FullName { get; set; } = string.Empty;
         public string DepartmentName { get; set; } = string.Empty;
         public int PenaltyPoints { get; set; }
+        public int PenaltyPointsInPeriod { get; set; }
         public int ActiveViolationCount { get; set; }
         public int TotalViolationCount { get; set; }
         public string UserStatus { get; set; } = string.Empty;
@@ -110,6 +132,9 @@
         public List<CategoryCountResponse> BookingStatusCounts { get; set; } = new();
         public List<CategoryCountResponse> BookingPurposeCounts { get; set; } = new();
         public List<CategoryCountResponse> BookingDepartmentCounts { get; set; } = new();
+        public List<ResourceUtilizationResponse> LabUtilization { get; set; } = new();
+        public List<ResourceUtilizationResponse> EquipmentUtilization { get; set; } = new();
+        public List<DepartmentUtilizationResponse> DepartmentUtilization { get; set; } = new();
         public List<MostUsedResourceResponse> MostUsedLabRooms { get; set; } = new();
         public List<MostUsedResourceResponse> MostUsedEquipments { get; set; } = new();
         public List<PenaltyUserReportResponse> UsersWithMostPenaltyPoints { get; set; } = new();

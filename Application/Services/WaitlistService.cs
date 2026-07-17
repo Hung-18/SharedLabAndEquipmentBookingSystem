@@ -28,23 +28,14 @@ namespace Application.Services
             var actor = await GetCurrentActiveUserAsync(cancellationToken);
             EnsureManagerOrAdmin(actor);
 
-            var waitlists = await _repository.GetAllAsync(cancellationToken);
-            var result = new List<WaitlistResponse>();
-
-            foreach (var waitlist in waitlists)
-            {
-                if (actor.Role?.RoleName == RoleName.Admin
-                    || await CanManageResourceAsync(
+            IReadOnlyList<Waitlist> waitlists =
+                actor.Role?.RoleName == RoleName.LabManager
+                    ? await _repository.GetByManagerIdAsync(
                         actor.UserId,
-                        waitlist.LabId,
-                        waitlist.EquipmentId,
-                        cancellationToken))
-                {
-                    result.Add(MapResponse(waitlist));
-                }
-            }
+                        cancellationToken)
+                    : await _repository.GetAllAsync(cancellationToken);
 
-            return result;
+            return waitlists.Select(MapResponse).ToList();
         }
 
         public async Task<WaitlistResponse?> GetByIdAsync(
@@ -279,7 +270,7 @@ namespace Application.Services
             int id,
             CancellationToken cancellationToken)
         {
-            var actor = await GetCurrentActiveUserAsync(cancellationToken);
+            var actor = await GetAuthenticatedUserAsync(cancellationToken);
             var waitlist = await GetWaitlistOrThrowAsync(id, cancellationToken);
 
             var canCancel = waitlist.UserId == actor.UserId
@@ -404,10 +395,12 @@ namespace Application.Services
                     $"Không tìm thấy booking có ID {bookingId}.");
 
             if (booking.Status is not BookingStatus.Cancelled
-                and not BookingStatus.Completed)
+                and not BookingStatus.Completed
+                and not BookingStatus.Rejected
+                and not BookingStatus.NoShow)
             {
                 throw new InvalidOperationException(
-                    "Chỉ booking Cancelled hoặc Completed mới giải phóng waitlist.");
+                    "Chỉ booking Cancelled, Completed, Rejected hoặc NoShow mới giải phóng waitlist.");
             }
 
             await NotifyForReleasedBookingCoreAsync(booking, cancellationToken);
@@ -535,71 +528,75 @@ namespace Application.Services
         private async Task<Waitlist?> NotifyNextForResourceAsync(
             int? labId,
             int? equipmentId,
-            DateTime requestedStart,
-            DateTime requestedEnd,
+            DateTime releasedStart,
+            DateTime releasedEnd,
             CancellationToken cancellationToken)
         {
-            var alreadyNotified = await _repository.ExistsAsync(
-                x => x.Status == WaitlistStatus.Notified
-                    && x.RequestedStart == requestedStart
-                    && x.RequestedEnd == requestedEnd
-                    && ((labId.HasValue && x.LabId == labId.Value)
-                        || (equipmentId.HasValue && x.EquipmentId == equipmentId.Value)),
-                cancellationToken);
-
-            if (alreadyNotified)
-                return null;
-
-            var approvedConflict = await _unitOfWork.Bookings.HasBookingConflictAsync(
+            var candidates = await _repository.GetWaitingByResourceAsync(
                 labId,
                 equipmentId,
-                requestedStart,
-                requestedEnd,
-                null,
-                includePending: false,
-                cancellationToken: cancellationToken);
-
-            if (approvedConflict)
-                return null;
-
-            var maintenanceConflict = await _unitOfWork.Maintenances.HasMaintenanceConflictAsync(
-                labId,
-                equipmentId,
-                requestedStart,
-                requestedEnd,
-                null,
+                releasedStart,
+                releasedEnd,
                 cancellationToken);
 
-            if (maintenanceConflict)
-                return null;
+            foreach (var candidate in candidates)
+            {
+                var activeHold = await _repository.GetActiveReservationAsync(
+                    candidate.LabId,
+                    candidate.EquipmentId,
+                    candidate.RequestedStart,
+                    candidate.RequestedEnd,
+                    cancellationToken);
 
-            var next = await _repository.GetNextInQueueAsync(
-                labId,
-                equipmentId,
-                requestedStart,
-                requestedEnd,
-                cancellationToken);
+                if (activeHold is not null)
+                    continue;
 
-            if (next is null)
-                return null;
+                var approvedConflict = await _unitOfWork.Bookings.HasBookingConflictAsync(
+                    candidate.LabId,
+                    candidate.EquipmentId,
+                    candidate.RequestedStart,
+                    candidate.RequestedEnd,
+                    excludeBookingId: null,
+                    includePending: false,
+                    cancellationToken: cancellationToken);
 
-            next.MarkNotified();
-            _repository.Update(next);
+                if (approvedConflict)
+                    continue;
 
-            var resourceName = labId.HasValue
-                ? $"phòng lab ID {labId.Value}"
-                : $"thiết bị ID {equipmentId!.Value}";
+                var maintenanceConflict =
+                    await _unitOfWork.Maintenances.HasMaintenanceConflictAsync(
+                        candidate.LabId,
+                        candidate.EquipmentId,
+                        candidate.RequestedStart,
+                        candidate.RequestedEnd,
+                        excludeMaintenanceId: null,
+                        cancellationToken: cancellationToken);
 
-            await _unitOfWork.Notifications.AddAsync(
-                new Notification(
-                    next.UserId,
-                    "Khung giờ trong hàng đợi đã có chỗ",
-                    $"{resourceName} đã trống từ {requestedStart:dd/MM/yyyy HH:mm} "
-                    + $"đến {requestedEnd:dd/MM/yyyy HH:mm}. Hãy tạo booking sớm.",
-                    NotificationType.WaitlistAvailable),
-                cancellationToken);
+                if (maintenanceConflict)
+                    continue;
 
-            return next;
+                candidate.MarkNotified();
+                _repository.Update(candidate);
+
+                var resourceName = candidate.LabId.HasValue
+                    ? $"phòng lab ID {candidate.LabId.Value}"
+                    : $"thiết bị ID {candidate.EquipmentId!.Value}";
+
+                await _unitOfWork.Notifications.AddAsync(
+                    new Notification(
+                        candidate.UserId,
+                        "Khung giờ trong hàng đợi đã có chỗ",
+                        $"{resourceName} đã trống từ "
+                        + $"{candidate.RequestedStart:dd/MM/yyyy HH:mm} đến "
+                        + $"{candidate.RequestedEnd:dd/MM/yyyy HH:mm}. "
+                        + "Khung giờ này được giữ ưu tiên cho bạn trong thời hạn thông báo.",
+                        NotificationType.WaitlistAvailable),
+                    cancellationToken);
+
+                return candidate;
+            }
+
+            return null;
         }
 
         private async Task<User> GetAuthenticatedUserAsync(

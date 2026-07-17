@@ -34,14 +34,14 @@ namespace Application.Services
             var actor = await GetCurrentActiveUserAsync(cancellationToken);
             EnsureManagerOrAdmin(actor);
 
-            var violations = await _repository.GetAllAsync(cancellationToken);
-            if (actor.Role?.RoleName == RoleName.LabManager)
-            {
-                violations = await FilterForManagerAsync(
-                    actor.UserId,
-                    violations,
-                    cancellationToken);
-            }
+            IReadOnlyList<Violation> violations =
+                actor.Role?.RoleName == RoleName.LabManager
+                    ? await _repository.GetByManagerIdAsync(
+                        actor.UserId,
+                        userId: null,
+                        activeOnly: false,
+                        cancellationToken: cancellationToken)
+                    : await _repository.GetAllAsync(cancellationToken);
 
             return violations
                 .OrderByDescending(x => x.LoggedAt)
@@ -74,15 +74,27 @@ namespace Application.Services
             var actor = await GetAuthenticatedUserAsync(cancellationToken);
             await GetUserOrThrowAsync(userId, cancellationToken);
 
-            var violations = await _repository.GetByUserIdAsync(
-                userId,
-                cancellationToken);
-
-            violations = await FilterReadableViolationsAsync(
-                actor,
-                userId,
-                violations,
-                cancellationToken);
+            IReadOnlyList<Violation> violations;
+            if (actor.UserId == userId
+                || actor.Role?.RoleName == RoleName.Admin)
+            {
+                violations = await _repository.GetByUserIdAsync(
+                    userId,
+                    cancellationToken);
+            }
+            else if (actor.Role?.RoleName == RoleName.LabManager)
+            {
+                violations = await _repository.GetByManagerIdAsync(
+                    actor.UserId,
+                    userId: userId,
+                    activeOnly: false,
+                    cancellationToken: cancellationToken);
+            }
+            else
+            {
+                throw new UnauthorizedAccessException(
+                    "Bạn không có quyền xem vi phạm của người dùng này.");
+            }
 
             return violations.Select(MapResponse).ToList();
         }
@@ -91,18 +103,30 @@ namespace Application.Services
             int userId,
             CancellationToken cancellationToken)
         {
-            var actor = await GetCurrentActiveUserAsync(cancellationToken);
+            var actor = await GetAuthenticatedUserAsync(cancellationToken);
             await GetUserOrThrowAsync(userId, cancellationToken);
 
-            var violations = await _repository.GetActiveByUserIdAsync(
-                userId,
-                cancellationToken);
-
-            violations = await FilterReadableViolationsAsync(
-                actor,
-                userId,
-                violations,
-                cancellationToken);
+            IReadOnlyList<Violation> violations;
+            if (actor.UserId == userId
+                || actor.Role?.RoleName == RoleName.Admin)
+            {
+                violations = await _repository.GetActiveByUserIdAsync(
+                    userId,
+                    cancellationToken);
+            }
+            else if (actor.Role?.RoleName == RoleName.LabManager)
+            {
+                violations = await _repository.GetByManagerIdAsync(
+                    actor.UserId,
+                    userId: userId,
+                    activeOnly: true,
+                    cancellationToken: cancellationToken);
+            }
+            else
+            {
+                throw new UnauthorizedAccessException(
+                    "Bạn không có quyền xem vi phạm của người dùng này.");
+            }
 
             return violations.Select(MapResponse).ToList();
         }
@@ -111,7 +135,7 @@ namespace Application.Services
             int bookingId,
             CancellationToken cancellationToken)
         {
-            var actor = await GetCurrentActiveUserAsync(cancellationToken);
+            var actor = await GetAuthenticatedUserAsync(cancellationToken);
             var booking = await GetBookingOrThrowAsync(
                 bookingId,
                 cancellationToken);
@@ -129,18 +153,30 @@ namespace Application.Services
             int userId,
             CancellationToken cancellationToken)
         {
-            var actor = await GetCurrentActiveUserAsync(cancellationToken);
+            var actor = await GetAuthenticatedUserAsync(cancellationToken);
             var user = await GetUserOrThrowAsync(userId, cancellationToken);
 
-            var activeViolations = await _repository.GetActiveByUserIdAsync(
-                userId,
-                cancellationToken);
-
-            activeViolations = await FilterReadableViolationsAsync(
-                actor,
-                userId,
-                activeViolations,
-                cancellationToken);
+            IReadOnlyList<Violation> activeViolations;
+            if (actor.UserId == userId
+                || actor.Role?.RoleName == RoleName.Admin)
+            {
+                activeViolations = await _repository.GetActiveByUserIdAsync(
+                    userId,
+                    cancellationToken);
+            }
+            else if (actor.Role?.RoleName == RoleName.LabManager)
+            {
+                activeViolations = await _repository.GetByManagerIdAsync(
+                    actor.UserId,
+                    userId: userId,
+                    activeOnly: true,
+                    cancellationToken: cancellationToken);
+            }
+            else
+            {
+                throw new UnauthorizedAccessException(
+                    "Bạn không có quyền xem tổng hợp vi phạm của người dùng này.");
+            }
 
             return new UserViolationSummaryResponse
             {
@@ -212,7 +248,7 @@ namespace Application.Services
             await _unitOfWork.ExecuteInSerializableTransactionAsync(
                 async ct =>
                 {
-                    var actor = await GetCurrentActiveUserAsync(ct);
+                    var actor = await GetAuthenticatedUserAsync(ct);
                     var booking = await GetBookingOrThrowAsync(bookingId, ct);
 
                     var existing = await _repository.FindAsync(
@@ -485,8 +521,10 @@ namespace Application.Services
                     cancellationToken);
 
                 bool hasDamageReport = usageLogs.Any(x =>
-                    x.IncidentStatus == UsageIncidentStatus.DamageReported
-                    || x.IncidentStatus == UsageIncidentStatus.MissingEquipment);
+                    (x.IncidentStatus == UsageIncidentStatus.DamageReported
+                        || x.IncidentStatus == UsageIncidentStatus.MissingEquipment)
+                    && x.IncidentReviewStatus
+                        == IncidentReviewStatus.Confirmed);
 
                 if (!hasDamageReport)
                 {
@@ -634,54 +672,6 @@ namespace Application.Services
             return BookingBelongsToManagedLabs(
                 booking,
                 labs.Select(x => x.LabId).ToHashSet());
-        }
-
-        private async Task<IReadOnlyList<Violation>> FilterReadableViolationsAsync(
-            User actor,
-            int targetUserId,
-            IReadOnlyList<Violation> violations,
-            CancellationToken cancellationToken)
-        {
-            if (actor.UserId == targetUserId
-                || actor.Role?.RoleName == RoleName.Admin)
-            {
-                return violations;
-            }
-
-            if (actor.Role?.RoleName == RoleName.LabManager)
-            {
-                return await FilterForManagerAsync(
-                    actor.UserId,
-                    violations,
-                    cancellationToken);
-            }
-
-            throw new UnauthorizedAccessException(
-                "Bạn không có quyền xem vi phạm của người dùng này.");
-        }
-
-        private async Task<IReadOnlyList<Violation>> FilterForManagerAsync(
-            int managerId,
-            IReadOnlyList<Violation> violations,
-            CancellationToken cancellationToken)
-        {
-            var labs = await _unitOfWork.LabRooms.GetByManagerIdAsync(
-                managerId,
-                cancellationToken);
-            var managedLabIds = labs.Select(x => x.LabId).ToHashSet();
-            var result = new List<Violation>();
-
-            foreach (var violation in violations)
-            {
-                var booking = await GetBookingOrThrowAsync(
-                    violation.BookingId,
-                    cancellationToken);
-
-                if (BookingBelongsToManagedLabs(booking, managedLabIds))
-                    result.Add(violation);
-            }
-
-            return result;
         }
 
         private static bool BookingBelongsToManagedLabs(

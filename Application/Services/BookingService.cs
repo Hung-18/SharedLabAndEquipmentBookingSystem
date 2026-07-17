@@ -101,7 +101,7 @@ namespace Application.Services
             return bookings.Select(MapResponse).ToList();
         }
 
-        public async Task<List<BookingResponse>> GetCalendarAsync(
+        public async Task<List<CalendarEventResponse>> GetCalendarAsync(
             DateTime from,
             DateTime to,
             int? labId,
@@ -116,6 +116,18 @@ namespace Application.Services
             if (labId.HasValue && equipmentId.HasValue)
                 throw new ArgumentException("Chỉ được lọc theo LabId hoặc EquipmentId, không truyền cả hai.");
 
+            int? equipmentLabId = null;
+            if (equipmentId.HasValue)
+            {
+                var equipment = await _unitOfWork.Equipments.GetByIdAsync(
+                    equipmentId.Value,
+                    cancellationToken)
+                    ?? throw new KeyNotFoundException(
+                        $"Không tìm thấy thiết bị có ID {equipmentId.Value}.");
+
+                equipmentLabId = equipment.LabId;
+            }
+
             var bookings = await _repository.GetCalendarAsync(
                 from,
                 to,
@@ -123,7 +135,38 @@ namespace Application.Services
                 equipmentId,
                 cancellationToken);
 
-            return bookings.Select(MapResponse).ToList();
+            var maintenances = await _unitOfWork.Maintenances.GetActiveInRangeAsync(
+                from,
+                to,
+                cancellationToken);
+
+            if (labId.HasValue)
+            {
+                maintenances = maintenances
+                    .Where(x =>
+                        x.LabId == labId.Value
+                        || x.Equipment?.LabId == labId.Value)
+                    .ToList();
+            }
+            else if (equipmentId.HasValue)
+            {
+                maintenances = maintenances
+                    .Where(x =>
+                        x.EquipmentId == equipmentId.Value
+                        || (equipmentLabId.HasValue
+                            && x.LabId == equipmentLabId.Value))
+                    .ToList();
+            }
+
+            var events = bookings
+                .Select(MapBookingCalendarEvent)
+                .Concat(maintenances.Select(MapMaintenanceCalendarEvent))
+                .OrderBy(x => x.StartTime)
+                .ThenBy(x => x.EventType)
+                .ThenBy(x => x.SourceId)
+                .ToList();
+
+            return events;
         }
 
         public async Task<List<SuggestedSlotResponse>> SuggestAlternativeSlotsAsync(
@@ -169,6 +212,13 @@ namespace Application.Services
                 request.Items,
                 cancellationToken);
 
+            await EnsureWaitlistHoldsAllowAsync(
+                actor.UserId,
+                request.Items,
+                request.StartTime,
+                request.EndTime,
+                cancellationToken);
+
             if (await HasAnyConflictAsync(
                     request.Items,
                     request.StartTime,
@@ -208,11 +258,40 @@ namespace Application.Services
                     booking.AddEquipment(item.EquipmentId!.Value, item.Note);
             }
 
-            await _unitOfWork.ExecuteInTransactionAsync(
+            await _unitOfWork.ExecuteInSerializableTransactionAsync(
                 async ct =>
                 {
+                    // Re-check the waitlist hold and approved/maintenance conflicts
+                    // inside the serializable transaction so another request cannot
+                    // bypass a notified user's temporary reservation.
+                    await EnsureWaitlistHoldsAllowAsync(
+                        actor.UserId,
+                        request.Items,
+                        request.StartTime,
+                        request.EndTime,
+                        ct);
+
+                    if (await HasAnyConflictAsync(
+                            request.Items,
+                            request.StartTime,
+                            request.EndTime,
+                            excludeBookingId: null,
+                            cancellationToken: ct))
+                    {
+                        throw new ResourceUnavailableException(
+                            "Tài nguyên vừa bị khóa bởi booking hoặc maintenance khác.",
+                            Array.Empty<SuggestedSlotResponse>());
+                    }
+
                     await _repository.AddAsync(booking, ct);
                     await _unitOfWork.SaveChangesAsync(ct);
+
+                    await MarkMatchingWaitlistHoldsBookedAsync(
+                        actor.UserId,
+                        request.Items,
+                        request.StartTime,
+                        request.EndTime,
+                        ct);
 
                     await _auditLogWriter.WriteAsync(
                         actorUserId: actor.UserId,
@@ -267,6 +346,22 @@ namespace Application.Services
                 currentItems,
                 cancellationToken);
 
+            await EnsureWaitlistReservationUpdateAllowedAsync(
+                actor.UserId,
+                currentItems,
+                booking.StartTime,
+                booking.EndTime,
+                request.StartTime,
+                request.EndTime,
+                cancellationToken);
+
+            await EnsureWaitlistHoldsAllowAsync(
+                actor.UserId,
+                currentItems,
+                request.StartTime,
+                request.EndTime,
+                cancellationToken);
+
             if (await HasAnyConflictAsync(
                     currentItems,
                     request.StartTime,
@@ -292,25 +387,56 @@ namespace Application.Services
 
             var oldValue = Snapshot(booking);
 
-            booking.UpdateDetails(
-                priorityRule?.PriorityRuleId,
-                request.PurposeType,
-                request.PurposeDescription,
-                request.StartTime,
-                request.EndTime);
+            await _unitOfWork.ExecuteInSerializableTransactionAsync(
+                async ct =>
+                {
+                    await EnsureWaitlistHoldsAllowAsync(
+                        actor.UserId,
+                        currentItems,
+                        request.StartTime,
+                        request.EndTime,
+                        ct);
 
-            _repository.Update(booking);
+                    if (await HasAnyConflictAsync(
+                            currentItems,
+                            request.StartTime,
+                            request.EndTime,
+                            excludeBookingId: id,
+                            cancellationToken: ct))
+                    {
+                        throw new ResourceUnavailableException(
+                            "Tài nguyên vừa bị khóa bởi booking hoặc maintenance khác.",
+                            Array.Empty<SuggestedSlotResponse>());
+                    }
 
-            await _auditLogWriter.WriteAsync(
-                actorUserId: actor.UserId,
-                actionType: AuditActionType.Update,
-                entityName: nameof(Booking),
-                entityId: booking.BookingId,
-                oldValue: oldValue,
-                newValue: Snapshot(booking),
-                cancellationToken: cancellationToken);
+                    booking.UpdateDetails(
+                        priorityRule?.PriorityRuleId,
+                        request.PurposeType,
+                        request.PurposeDescription,
+                        request.StartTime,
+                        request.EndTime);
 
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
+                    _repository.Update(booking);
+
+                    await MarkMatchingWaitlistHoldsBookedAsync(
+                        actor.UserId,
+                        currentItems,
+                        request.StartTime,
+                        request.EndTime,
+                        ct);
+
+                    await _auditLogWriter.WriteAsync(
+                        actorUserId: actor.UserId,
+                        actionType: AuditActionType.Update,
+                        entityName: nameof(Booking),
+                        entityId: booking.BookingId,
+                        oldValue: oldValue,
+                        newValue: Snapshot(booking),
+                        cancellationToken: ct);
+
+                    await _unitOfWork.SaveChangesAsync(ct);
+                },
+                cancellationToken);
         }
 
         public async Task ApproveAsync(
@@ -331,11 +457,28 @@ namespace Application.Services
                     }
 
                     await EnsureManagerCanManageBookingAsync(actor, booking, ct);
-                    await EnsurePriorityTurnAsync(booking, ct);
 
                     var items = booking.BookingItems
                         .Select(ToRequest)
                         .ToList();
+
+                    await EnsureWaitlistHoldsAllowAsync(
+                        booking.UserId,
+                        items,
+                        booking.StartTime,
+                        booking.EndTime,
+                        ct);
+
+                    bool hasWaitlistReservation =
+                        await HasMatchingWaitlistReservationAsync(
+                            booking.UserId,
+                            items,
+                            booking.StartTime,
+                            booking.EndTime,
+                            ct);
+
+                    if (!hasWaitlistReservation)
+                        await EnsurePriorityTurnAsync(booking, ct);
 
                     await ValidateItemsAsync(
                         items,
@@ -347,6 +490,13 @@ namespace Application.Services
                     var oldValue = Snapshot(booking);
                     booking.Approve(actor.UserId);
                     _repository.Update(booking);
+
+                    await MarkMatchingWaitlistHoldsBookedAsync(
+                        booking.UserId,
+                        items,
+                        booking.StartTime,
+                        booking.EndTime,
+                        ct);
 
                     await _unitOfWork.Notifications.AddAsync(
                         new Notification(
@@ -380,31 +530,43 @@ namespace Application.Services
 
             var actor = await GetCurrentActiveUserAsync(cancellationToken);
             EnsureManagerOrAdmin(actor);
-            var booking = await GetBookingOrThrowAsync(id, cancellationToken);
-            await EnsureManagerCanManageBookingAsync(actor, booking, cancellationToken);
 
-            var oldValue = Snapshot(booking);
-            booking.Reject(actor.UserId, request.RejectionReason);
-            _repository.Update(booking);
+            await _unitOfWork.ExecuteInSerializableTransactionAsync(
+                async ct =>
+                {
+                    var booking = await GetBookingOrThrowAsync(id, ct);
+                    await EnsureManagerCanManageBookingAsync(actor, booking, ct);
 
-            await _unitOfWork.Notifications.AddAsync(
-                new Notification(
-                    booking.UserId,
-                    "Booking bị từ chối",
-                    $"Booking #{booking.BookingId} bị từ chối. Lý do: {booking.RejectionReason}",
-                    NotificationType.BookingRejected),
+                    var oldValue = Snapshot(booking);
+                    booking.Reject(actor.UserId, request.RejectionReason);
+                    _repository.Update(booking);
+
+                    await _unitOfWork.Notifications.AddAsync(
+                        new Notification(
+                            booking.UserId,
+                            "Booking bị từ chối",
+                            $"Booking #{booking.BookingId} bị từ chối. Lý do: {booking.RejectionReason}",
+                            NotificationType.BookingRejected),
+                        ct);
+
+                    await _auditLogWriter.WriteAsync(
+                        actorUserId: actor.UserId,
+                        actionType: AuditActionType.RejectBooking,
+                        entityName: nameof(Booking),
+                        entityId: booking.BookingId,
+                        oldValue: oldValue,
+                        newValue: Snapshot(booking),
+                        cancellationToken: ct);
+
+                    await _unitOfWork.SaveChangesAsync(ct);
+
+                    await _waitlistService.NotifyNextForReleasedBookingAsync(
+                        booking.BookingId,
+                        ct);
+
+                    await _unitOfWork.SaveChangesAsync(ct);
+                },
                 cancellationToken);
-
-            await _auditLogWriter.WriteAsync(
-                actorUserId: actor.UserId,
-                actionType: AuditActionType.RejectBooking,
-                entityName: nameof(Booking),
-                entityId: booking.BookingId,
-                oldValue: oldValue,
-                newValue: Snapshot(booking),
-                cancellationToken: cancellationToken);
-
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
         }
 
         public async Task CancelAsync(
@@ -412,38 +574,45 @@ namespace Application.Services
             CancellationToken cancellationToken)
         {
             var actor = await GetAuthenticatedUserAsync(cancellationToken);
-            var booking = await GetBookingOrThrowAsync(id, cancellationToken);
 
-            var isOwner = booking.UserId == actor.UserId;
-            var isAdmin = actor.Role?.RoleName == RoleName.Admin;
-            var isManagingManager = actor.Role?.RoleName == RoleName.LabManager
-                && await CanManageBookingAsync(actor.UserId, booking, cancellationToken);
-
-            if (!isOwner && !isAdmin && !isManagingManager)
-                throw new UnauthorizedAccessException("Bạn không có quyền hủy booking này.");
-
-            if (booking.Status == BookingStatus.Approved
-                && DateTime.UtcNow >= booking.StartTime)
-            {
-                throw new InvalidOperationException(
-                    "Không thể hủy booking Approved sau khi đã đến giờ bắt đầu.");
-            }
-
-            var usageLogs = await _unitOfWork.UsageLogs.GetByBookingIdAsync(
-                booking.BookingId,
-                cancellationToken);
-            if (usageLogs.Any(x => x.ActualCheckout is null))
-            {
-                throw new InvalidOperationException(
-                    "Không thể hủy booking khi đang có tài nguyên chưa checkout.");
-            }
-
-            var releasedApprovedSlot = booking.Status == BookingStatus.Approved;
-            var oldValue = Snapshot(booking);
-
-            await _unitOfWork.ExecuteInTransactionAsync(
+            await _unitOfWork.ExecuteInSerializableTransactionAsync(
                 async ct =>
                 {
+                    var booking = await GetBookingOrThrowAsync(id, ct);
+
+                    var isOwner = booking.UserId == actor.UserId;
+                    var isAdmin = actor.Role?.RoleName == RoleName.Admin;
+                    var isManagingManager =
+                        actor.Role?.RoleName == RoleName.LabManager
+                        && await CanManageBookingAsync(actor.UserId, booking, ct);
+
+                    if (!isOwner && !isAdmin && !isManagingManager)
+                    {
+                        throw new UnauthorizedAccessException(
+                            "Bạn không có quyền hủy booking này.");
+                    }
+
+                    if (booking.Status == BookingStatus.Approved
+                        && DateTime.UtcNow >= booking.StartTime)
+                    {
+                        throw new InvalidOperationException(
+                            "Không thể hủy booking Approved sau khi đã đến giờ bắt đầu.");
+                    }
+
+                    var usageLogs = await _unitOfWork.UsageLogs.GetByBookingIdAsync(
+                        booking.BookingId,
+                        ct);
+
+                    if (usageLogs.Any(x => x.ActualCheckout is null))
+                    {
+                        throw new InvalidOperationException(
+                            "Không thể hủy booking khi đang có tài nguyên chưa checkout.");
+                    }
+
+                    bool shouldReleaseSlot = booking.Status
+                        is BookingStatus.Pending or BookingStatus.Approved;
+                    var oldValue = Snapshot(booking);
+
                     booking.Cancel();
                     _repository.Update(booking);
 
@@ -465,15 +634,17 @@ namespace Application.Services
                         cancellationToken: ct);
 
                     await _unitOfWork.SaveChangesAsync(ct);
+
+                    if (shouldReleaseSlot)
+                    {
+                        await _waitlistService.NotifyNextForCancelledBookingAsync(
+                            booking.BookingId,
+                            ct);
+                    }
+
+                    await _unitOfWork.SaveChangesAsync(ct);
                 },
                 cancellationToken);
-
-            if (releasedApprovedSlot)
-            {
-                await _waitlistService.NotifyNextForCancelledBookingAsync(
-                    booking.BookingId,
-                    cancellationToken);
-            }
         }
 
         public async Task CompleteAsync(
@@ -482,48 +653,59 @@ namespace Application.Services
         {
             var actor = await GetCurrentActiveUserAsync(cancellationToken);
             EnsureManagerOrAdmin(actor);
-            var booking = await GetBookingOrThrowAsync(id, cancellationToken);
-            await EnsureManagerCanManageBookingAsync(actor, booking, cancellationToken);
 
-            var now = DateTime.UtcNow;
-            if (now < booking.StartTime)
-                throw new InvalidOperationException("Không thể hoàn thành booking trước giờ bắt đầu.");
+            await _unitOfWork.ExecuteInSerializableTransactionAsync(
+                async ct =>
+                {
+                    var booking = await GetBookingOrThrowAsync(id, ct);
+                    await EnsureManagerCanManageBookingAsync(actor, booking, ct);
 
-            var allItemsCheckedOut = await AreAllItemsCheckedOutAsync(
-                booking,
-                cancellationToken);
+                    var now = DateTime.UtcNow;
+                    if (now < booking.StartTime)
+                    {
+                        throw new InvalidOperationException(
+                            "Không thể hoàn thành booking trước giờ bắt đầu.");
+                    }
 
-            if (now < booking.EndTime && !allItemsCheckedOut)
-            {
-                throw new InvalidOperationException(
-                    "Chỉ được hoàn thành trước giờ kết thúc khi tất cả tài nguyên đã checkout.");
-            }
+                    var allItemsCheckedOut = await AreAllItemsCheckedOutAsync(
+                        booking,
+                        ct);
 
-            var oldValue = Snapshot(booking);
-            booking.Complete();
-            _repository.Update(booking);
+                    if (now < booking.EndTime && !allItemsCheckedOut)
+                    {
+                        throw new InvalidOperationException(
+                            "Chỉ được hoàn thành trước giờ kết thúc khi tất cả tài nguyên đã checkout.");
+                    }
 
-            await _unitOfWork.Notifications.AddAsync(
-                new Notification(
-                    booking.UserId,
-                    "Booking đã hoàn thành",
-                    $"Booking #{booking.BookingId} đã được hoàn thành.",
-                    NotificationType.System),
-                cancellationToken);
+                    var oldValue = Snapshot(booking);
+                    booking.Complete();
+                    _repository.Update(booking);
 
-            await _auditLogWriter.WriteAsync(
-                actorUserId: actor.UserId,
-                actionType: AuditActionType.Update,
-                entityName: nameof(Booking),
-                entityId: booking.BookingId,
-                oldValue: oldValue,
-                newValue: Snapshot(booking),
-                cancellationToken: cancellationToken);
+                    await _unitOfWork.Notifications.AddAsync(
+                        new Notification(
+                            booking.UserId,
+                            "Booking đã hoàn thành",
+                            $"Booking #{booking.BookingId} đã được hoàn thành.",
+                            NotificationType.System),
+                        ct);
 
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
+                    await _auditLogWriter.WriteAsync(
+                        actorUserId: actor.UserId,
+                        actionType: AuditActionType.Update,
+                        entityName: nameof(Booking),
+                        entityId: booking.BookingId,
+                        oldValue: oldValue,
+                        newValue: Snapshot(booking),
+                        cancellationToken: ct);
 
-            await _waitlistService.NotifyNextForReleasedBookingAsync(
-                booking.BookingId,
+                    await _unitOfWork.SaveChangesAsync(ct);
+
+                    await _waitlistService.NotifyNextForReleasedBookingAsync(
+                        booking.BookingId,
+                        ct);
+
+                    await _unitOfWork.SaveChangesAsync(ct);
+                },
                 cancellationToken);
         }
 
@@ -533,48 +715,63 @@ namespace Application.Services
         {
             var actor = await GetCurrentActiveUserAsync(cancellationToken);
             EnsureManagerOrAdmin(actor);
-            var booking = await GetBookingOrThrowAsync(id, cancellationToken);
-            await EnsureManagerCanManageBookingAsync(actor, booking, cancellationToken);
 
-            if (DateTime.UtcNow < booking.StartTime.Add(NoShowGracePeriod))
-            {
-                throw new InvalidOperationException(
-                    $"Chỉ được đánh dấu NoShow sau {NoShowGracePeriod.TotalMinutes:0} phút kể từ giờ bắt đầu.");
-            }
+            await _unitOfWork.ExecuteInSerializableTransactionAsync(
+                async ct =>
+                {
+                    var booking = await GetBookingOrThrowAsync(id, ct);
+                    await EnsureManagerCanManageBookingAsync(actor, booking, ct);
 
-            var usageLogs = await _unitOfWork.UsageLogs.GetByBookingIdAsync(
-                booking.BookingId,
-                cancellationToken);
+                    if (DateTime.UtcNow < booking.StartTime.Add(NoShowGracePeriod))
+                    {
+                        throw new InvalidOperationException(
+                            $"Chỉ được đánh dấu NoShow sau {NoShowGracePeriod.TotalMinutes:0} phút kể từ giờ bắt đầu.");
+                    }
 
-            if (usageLogs.Count > 0)
-                throw new InvalidOperationException("Booking đã có check-in nên không thể đánh dấu NoShow.");
+                    var usageLogs = await _unitOfWork.UsageLogs.GetByBookingIdAsync(
+                        booking.BookingId,
+                        ct);
 
-            var oldValue = Snapshot(booking);
-            booking.MarkNoShow();
-            _repository.Update(booking);
+                    if (usageLogs.Count > 0)
+                    {
+                        throw new InvalidOperationException(
+                            "Booking đã có check-in nên không thể đánh dấu NoShow.");
+                    }
 
-            await _unitOfWork.Notifications.AddAsync(
-                new Notification(
-                    booking.UserId,
-                    "Booking bị đánh dấu NoShow",
-                    $"Booking #{booking.BookingId} đã bị đánh dấu NoShow.",
-                    NotificationType.Violation),
-                cancellationToken);
+                    var oldValue = Snapshot(booking);
+                    booking.MarkNoShow();
+                    _repository.Update(booking);
 
-            await _auditLogWriter.WriteAsync(
-                actorUserId: actor.UserId,
-                actionType: AuditActionType.Update,
-                entityName: nameof(Booking),
-                entityId: booking.BookingId,
-                oldValue: oldValue,
-                newValue: Snapshot(booking),
-                cancellationToken: cancellationToken);
+                    await _unitOfWork.Notifications.AddAsync(
+                        new Notification(
+                            booking.UserId,
+                            "Booking bị đánh dấu NoShow",
+                            $"Booking #{booking.BookingId} đã bị đánh dấu NoShow.",
+                            NotificationType.Violation),
+                        ct);
 
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
+                    await _auditLogWriter.WriteAsync(
+                        actorUserId: actor.UserId,
+                        actionType: AuditActionType.Update,
+                        entityName: nameof(Booking),
+                        entityId: booking.BookingId,
+                        oldValue: oldValue,
+                        newValue: Snapshot(booking),
+                        cancellationToken: ct);
 
-            await _violationService.EnsureAutomaticViolationAsync(
-                booking.BookingId,
-                ViolationType.NoShow,
+                    await _unitOfWork.SaveChangesAsync(ct);
+
+                    await _violationService.EnsureAutomaticViolationAsync(
+                        booking.BookingId,
+                        ViolationType.NoShow,
+                        ct);
+
+                    await _waitlistService.NotifyNextForReleasedBookingAsync(
+                        booking.BookingId,
+                        ct);
+
+                    await _unitOfWork.SaveChangesAsync(ct);
+                },
                 cancellationToken);
         }
 
@@ -1092,6 +1289,179 @@ namespace Application.Services
             }
         }
 
+        private async Task<bool> HasMatchingWaitlistReservationAsync(
+            int userId,
+            IReadOnlyCollection<BookingItemRequest> items,
+            DateTime startTime,
+            DateTime endTime,
+            CancellationToken cancellationToken)
+        {
+            if (items.Count != 1)
+                return false;
+
+            var item = items.Single();
+            var reservation =
+                await _unitOfWork.Waitlists.GetActiveReservationAsync(
+                    item.LabId,
+                    item.EquipmentId,
+                    startTime,
+                    endTime,
+                    cancellationToken);
+
+            if (reservation is null
+                || reservation.UserId != userId
+                || reservation.RequestedStart != startTime
+                || reservation.RequestedEnd != endTime)
+            {
+                return false;
+            }
+
+            return (reservation.LabId.HasValue
+                    && item.LabId == reservation.LabId
+                    && item.EquipmentId is null)
+                || (reservation.EquipmentId.HasValue
+                    && item.EquipmentId == reservation.EquipmentId
+                    && item.LabId is null);
+        }
+
+        private async Task EnsureWaitlistReservationUpdateAllowedAsync(
+            int userId,
+            IReadOnlyCollection<BookingItemRequest> items,
+            DateTime currentStart,
+            DateTime currentEnd,
+            DateTime requestedStart,
+            DateTime requestedEnd,
+            CancellationToken cancellationToken)
+        {
+            foreach (var item in items)
+            {
+                var reservation =
+                    await _unitOfWork.Waitlists.GetActiveReservationAsync(
+                        item.LabId,
+                        item.EquipmentId,
+                        currentStart,
+                        currentEnd,
+                        cancellationToken);
+
+                if (reservation is null
+                    || reservation.Status != WaitlistStatus.Booked
+                    || reservation.UserId != userId
+                    || reservation.RequestedStart != currentStart
+                    || reservation.RequestedEnd != currentEnd)
+                {
+                    continue;
+                }
+
+                if (requestedStart != currentStart
+                    || requestedEnd != currentEnd)
+                {
+                    throw new InvalidOperationException(
+                        "Booking được tạo từ waitlist phải giữ nguyên khung giờ. "
+                        + "Hãy hủy booking để chuyển quyền ưu tiên cho người tiếp theo.");
+                }
+            }
+        }
+
+        private async Task EnsureWaitlistHoldsAllowAsync(
+            int userId,
+            IReadOnlyCollection<BookingItemRequest> items,
+            DateTime startTime,
+            DateTime endTime,
+            CancellationToken cancellationToken)
+        {
+            var holds = new Dictionary<int, Waitlist>();
+
+            foreach (var item in items)
+            {
+                var hold = await _unitOfWork.Waitlists.GetActiveReservationAsync(
+                    item.LabId,
+                    item.EquipmentId,
+                    startTime,
+                    endTime,
+                    cancellationToken);
+
+                if (hold is not null)
+                    holds[hold.WaitlistId] = hold;
+            }
+
+            if (holds.Count == 0)
+                return;
+
+            if (holds.Values.Any(x => x.UserId != userId))
+            {
+                throw new InvalidOperationException(
+                    "Khung giờ đang được giữ ưu tiên cho người dùng khác trong waitlist.");
+            }
+
+            if (items.Count != 1 || holds.Count != 1)
+            {
+                throw new InvalidOperationException(
+                    "Khi nhận chỗ từ waitlist, booking phải chứa đúng tài nguyên đã được thông báo.");
+            }
+
+            var requestedItem = items.Single();
+            var activeHold = holds.Values.Single();
+
+            bool exactResource =
+                (activeHold.LabId.HasValue
+                    && requestedItem.LabId == activeHold.LabId
+                    && requestedItem.EquipmentId is null)
+                || (activeHold.EquipmentId.HasValue
+                    && requestedItem.EquipmentId == activeHold.EquipmentId
+                    && requestedItem.LabId is null);
+
+            if (!exactResource
+                || activeHold.RequestedStart != startTime
+                || activeHold.RequestedEnd != endTime)
+            {
+                throw new InvalidOperationException(
+                    "Booking phải dùng đúng tài nguyên và đúng khung giờ đã được waitlist giữ chỗ.");
+            }
+        }
+
+        private async Task MarkMatchingWaitlistHoldsBookedAsync(
+            int userId,
+            IReadOnlyCollection<BookingItemRequest> items,
+            DateTime startTime,
+            DateTime endTime,
+            CancellationToken cancellationToken)
+        {
+            foreach (var item in items)
+            {
+                var hold = await _unitOfWork.Waitlists.GetActiveReservationAsync(
+                    item.LabId,
+                    item.EquipmentId,
+                    startTime,
+                    endTime,
+                    cancellationToken);
+
+                if (hold is null
+                    || hold.UserId != userId
+                    || hold.RequestedStart != startTime
+                    || hold.RequestedEnd != endTime)
+                {
+                    continue;
+                }
+
+                bool exactResource =
+                    (hold.LabId.HasValue
+                        && item.LabId == hold.LabId
+                        && item.EquipmentId is null)
+                    || (hold.EquipmentId.HasValue
+                        && item.EquipmentId == hold.EquipmentId
+                        && item.LabId is null);
+
+                if (!exactResource)
+                    continue;
+
+                if (hold.Status == WaitlistStatus.Notified)
+                {
+                    hold.MarkBooked();
+                    _unitOfWork.Waitlists.Update(hold);
+                }
+            }
+        }
+
         private async Task EnsureNoConflictAsync(
             int? labId,
             int? equipmentId,
@@ -1188,6 +1558,73 @@ namespace Application.Services
                 booking.ApprovedById,
                 booking.ApprovedAt,
                 booking.RejectionReason
+            };
+        }
+
+        private static CalendarEventResponse MapBookingCalendarEvent(
+            Booking booking)
+        {
+            return new CalendarEventResponse
+            {
+                EventType = "Booking",
+                SourceId = booking.BookingId,
+                Title = $"Booking #{booking.BookingId} - {booking.PurposeType}",
+                StartTime = booking.StartTime,
+                EndTime = booking.EndTime,
+                Status = booking.Status.ToString(),
+                Blocking = booking.Status == BookingStatus.Approved,
+                UserId = booking.UserId,
+                Resources = booking.BookingItems
+                    .Select(item => new CalendarResourceResponse
+                    {
+                        ResourceType = item.ResourceType.ToString(),
+                        ResourceId = item.LabId ?? item.EquipmentId!.Value,
+                        LabId = item.LabId
+                            ?? item.Equipment?.LabId
+                            ?? 0,
+                        ResourceName = item.LabRoom?.LabName
+                            ?? item.Equipment?.EquipmentName
+                            ?? string.Empty
+                    })
+                    .ToList()
+            };
+        }
+
+        private static CalendarEventResponse MapMaintenanceCalendarEvent(
+            Maintenance maintenance)
+        {
+            bool isLab = maintenance.LabId.HasValue;
+
+            return new CalendarEventResponse
+            {
+                EventType = "Maintenance",
+                SourceId = maintenance.MaintenanceId,
+                Title = isLab
+                    ? $"Bảo trì phòng {maintenance.LabRoom?.LabName ?? maintenance.LabId!.Value.ToString()}"
+                    : $"Bảo trì thiết bị {maintenance.Equipment?.EquipmentName ?? maintenance.EquipmentId!.Value.ToString()}",
+                StartTime = maintenance.StartTime,
+                EndTime = maintenance.EndTime,
+                Status = maintenance.Status.ToString(),
+                Blocking = maintenance.Status is MaintenanceStatus.Scheduled
+                    or MaintenanceStatus.InProgress,
+                UserId = null,
+                Resources = new List<CalendarResourceResponse>
+                {
+                    new()
+                    {
+                        ResourceType = isLab
+                            ? ResourceType.LabRoom.ToString()
+                            : ResourceType.Equipment.ToString(),
+                        ResourceId = maintenance.LabId
+                            ?? maintenance.EquipmentId!.Value,
+                        LabId = maintenance.LabId
+                            ?? maintenance.Equipment?.LabId
+                            ?? 0,
+                        ResourceName = isLab
+                            ? maintenance.LabRoom?.LabName ?? string.Empty
+                            : maintenance.Equipment?.EquipmentName ?? string.Empty
+                    }
+                }
             };
         }
 

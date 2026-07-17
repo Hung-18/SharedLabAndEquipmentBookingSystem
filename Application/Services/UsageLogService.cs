@@ -46,27 +46,12 @@ namespace Application.Services
             var actor = await GetCurrentActiveUserAsync(cancellationToken);
             EnsureManagerOrAdmin(actor);
 
-            var logs = await _repository.GetAllAsync(cancellationToken);
-
-            if (actor.Role?.RoleName == RoleName.LabManager)
-            {
-                var managedLabIds = await GetManagedLabIdsAsync(
-                    actor.UserId,
-                    cancellationToken);
-                var permittedLogs = new List<UsageLog>();
-
-                foreach (var log in logs)
-                {
-                    var booking = await GetBookingForLogAsync(
-                        log,
-                        cancellationToken);
-
-                    if (BookingBelongsToManagedLabs(booking, managedLabIds))
-                        permittedLogs.Add(log);
-                }
-
-                logs = permittedLogs;
-            }
+            IReadOnlyList<UsageLog> logs =
+                actor.Role?.RoleName == RoleName.LabManager
+                    ? await _repository.GetByManagerIdAsync(
+                        actor.UserId,
+                        cancellationToken)
+                    : await _repository.GetAllAsync(cancellationToken);
 
             return logs.Select(MapResponse).ToList();
         }
@@ -147,30 +132,17 @@ namespace Application.Services
                     "Thời gian bắt đầu phải nhỏ hơn thời gian kết thúc.");
             }
 
-            var logs = await _repository.GetIncidentLogsAsync(
-                from,
-                to,
-                cancellationToken);
-
-            if (actor.Role?.RoleName == RoleName.LabManager)
-            {
-                var managedLabIds = await GetManagedLabIdsAsync(
-                    actor.UserId,
-                    cancellationToken);
-
-                var permittedLogs = new List<UsageLog>();
-                foreach (var log in logs)
-                {
-                    var booking = await GetBookingForLogAsync(
-                        log,
+            IReadOnlyList<UsageLog> logs =
+                actor.Role?.RoleName == RoleName.LabManager
+                    ? await _repository.GetIncidentLogsByManagerIdAsync(
+                        actor.UserId,
+                        from,
+                        to,
+                        cancellationToken)
+                    : await _repository.GetIncidentLogsAsync(
+                        from,
+                        to,
                         cancellationToken);
-
-                    if (BookingBelongsToManagedLabs(booking, managedLabIds))
-                        permittedLogs.Add(log);
-                }
-
-                logs = permittedLogs;
-            }
 
             return logs.Select(MapResponse).ToList();
         }
@@ -274,8 +246,6 @@ namespace Application.Services
             ArgumentNullException.ThrowIfNull(request);
 
             UsageLog? updatedLog = null;
-            int? lateBookingId = null;
-            int? completedBookingId = null;
 
             await _unitOfWork.ExecuteInSerializableTransactionAsync(
                 async ct =>
@@ -302,17 +272,19 @@ namespace Application.Services
                         usageLog.ActualCheckout,
                         IncidentStatus = usageLog.IncidentStatus.ToString(),
                         usageLog.IncidentDescription,
+                        usageLog.AffectedEquipmentId,
                         BookingStatus = booking.Status.ToString()
                     };
 
                     usageLog.CheckOut(actualCheckout);
+                    bool isLateCheckout = actualCheckout > booking.EndTime;
 
-                    if (actualCheckout > booking.EndTime)
+                    if (isLateCheckout
+                        && usageLog.IncidentStatus == UsageIncidentStatus.None)
                     {
                         usageLog.ReportIncident(
                             UsageIncidentStatus.LateCheckout,
                             "Checkout sau thời gian kết thúc booking.");
-                        lateBookingId = booking.BookingId;
                     }
 
                     var bookingItem = booking.BookingItems.FirstOrDefault(
@@ -334,12 +306,13 @@ namespace Application.Services
                                 log.BookingItemId == item.BookingItemId
                                 && log.ActualCheckout.HasValue));
 
+                    bool bookingCompleted = false;
                     if (allItemsCheckedOut
                         && actualCheckout >= booking.StartTime
                         && booking.Status == BookingStatus.Approved)
                     {
                         booking.Complete();
-                        completedBookingId = booking.BookingId;
+                        bookingCompleted = true;
                         _unitOfWork.Bookings.Update(booking);
 
                         await _unitOfWork.Notifications.AddAsync(
@@ -378,30 +351,35 @@ namespace Application.Services
                             usageLog.ActualCheckout,
                             IncidentStatus = usageLog.IncidentStatus.ToString(),
                             usageLog.IncidentDescription,
+                            usageLog.AffectedEquipmentId,
                             BookingStatus = booking.Status.ToString(),
                             Backdated = request.ActualCheckout.HasValue
                         },
                         cancellationToken: ct);
 
+                    // Lưu trạng thái checkout/booking trước để các service con
+                    // đọc được dữ liệu mới, nhưng vẫn chưa commit transaction ngoài.
+                    await _unitOfWork.SaveChangesAsync(ct);
+
+                    if (isLateCheckout)
+                    {
+                        await _violationService.EnsureAutomaticViolationAsync(
+                            booking.BookingId,
+                            ViolationType.LateCheckout,
+                            ct);
+                    }
+
+                    if (bookingCompleted)
+                    {
+                        await _waitlistService.NotifyNextForReleasedBookingAsync(
+                            booking.BookingId,
+                            ct);
+                    }
+
                     await _unitOfWork.SaveChangesAsync(ct);
                     updatedLog = usageLog;
                 },
                 cancellationToken);
-
-            if (lateBookingId.HasValue)
-            {
-                await _violationService.EnsureAutomaticViolationAsync(
-                    lateBookingId.Value,
-                    ViolationType.LateCheckout,
-                    cancellationToken);
-            }
-
-            if (completedBookingId.HasValue)
-            {
-                await _waitlistService.NotifyNextForReleasedBookingAsync(
-                    completedBookingId.Value,
-                    cancellationToken);
-            }
 
             return MapResponse(updatedLog!);
         }
@@ -412,86 +390,237 @@ namespace Application.Services
             CancellationToken cancellationToken)
         {
             ArgumentNullException.ThrowIfNull(request);
+            UsageLog? updatedLog = null;
 
-            var actor = await GetAuthenticatedUserAsync(cancellationToken);
-            var usageLog = await GetLogOrThrowAsync(logId, cancellationToken);
-            var booking = await GetBookingForLogAsync(
-                usageLog,
-                cancellationToken);
-
-            await EnsureCanAccessBookingAsync(
-                actor,
-                booking,
-                cancellationToken);
-
-            if (!Enum.IsDefined(request.IncidentStatus)
-                || request.IncidentStatus == UsageIncidentStatus.None)
-            {
-                throw new ArgumentException("Trạng thái sự cố không hợp lệ.");
-            }
-
-            var oldValue = new
-            {
-                IncidentStatus = usageLog.IncidentStatus.ToString(),
-                usageLog.IncidentDescription
-            };
-
-            usageLog.ReportIncident(
-                request.IncidentStatus,
-                request.IncidentDescription);
-
-            if (request.IncidentStatus is UsageIncidentStatus.DamageReported
-                or UsageIncidentStatus.MissingEquipment)
-            {
-                var bookingItem = booking.BookingItems.FirstOrDefault(
-                    x => x.BookingItemId == usageLog.BookingItemId)
-                    ?? throw new KeyNotFoundException(
-                        $"Không tìm thấy BookingItem có ID {usageLog.BookingItemId}.");
-
-                if (bookingItem.EquipmentId.HasValue)
+            await _unitOfWork.ExecuteInSerializableTransactionAsync(
+                async ct =>
                 {
-                    var equipment = await _unitOfWork.Equipments.GetDetailAsync(
-                        bookingItem.EquipmentId.Value,
-                        cancellationToken)
+                    var actor = await GetAuthenticatedUserAsync(ct);
+                    var usageLog = await GetLogOrThrowAsync(logId, ct);
+                    var booking = await GetBookingForLogAsync(usageLog, ct);
+
+                    await EnsureCanAccessBookingAsync(
+                        actor,
+                        booking,
+                        ct);
+
+                    if (!Enum.IsDefined(request.IncidentStatus)
+                        || request.IncidentStatus == UsageIncidentStatus.None)
+                    {
+                        throw new ArgumentException(
+                            "Trạng thái sự cố không hợp lệ.");
+                    }
+
+                    var bookingItem = booking.BookingItems.FirstOrDefault(
+                        x => x.BookingItemId == usageLog.BookingItemId)
                         ?? throw new KeyNotFoundException(
-                            $"Không tìm thấy thiết bị có ID {bookingItem.EquipmentId.Value}.");
+                            $"Không tìm thấy BookingItem có ID {usageLog.BookingItemId}.");
 
-                    equipment.MarkBroken();
-                    _unitOfWork.Equipments.Update(equipment);
+                    bool isEquipmentIncident =
+                        request.IncidentStatus is UsageIncidentStatus.DamageReported
+                            or UsageIncidentStatus.MissingEquipment;
 
-                    if (equipment.LabRoom?.ManagerId is int managerId)
+                    int? affectedEquipmentId = request.AffectedEquipmentId;
+
+                    if (bookingItem.EquipmentId.HasValue)
+                    {
+                        if (affectedEquipmentId.HasValue
+                            && affectedEquipmentId.Value
+                                != bookingItem.EquipmentId.Value)
+                        {
+                            throw new ArgumentException(
+                                "AffectedEquipmentId không khớp thiết bị của BookingItem.");
+                        }
+
+                        affectedEquipmentId = bookingItem.EquipmentId.Value;
+                    }
+                    else if (isEquipmentIncident
+                        && !affectedEquipmentId.HasValue)
+                    {
+                        throw new ArgumentException(
+                            "Phải nhập AffectedEquipmentId khi báo hư hỏng/mất thiết bị trong booking cả phòng.");
+                    }
+
+                    Equipment? affectedEquipment = null;
+                    if (affectedEquipmentId.HasValue)
+                    {
+                        affectedEquipment =
+                            await _unitOfWork.Equipments.GetDetailAsync(
+                                affectedEquipmentId.Value,
+                                ct)
+                            ?? throw new KeyNotFoundException(
+                                $"Không tìm thấy thiết bị có ID {affectedEquipmentId.Value}.");
+
+                        int? bookedLabId = bookingItem.LabId
+                            ?? bookingItem.Equipment?.LabId;
+
+                        if (!bookedLabId.HasValue
+                            || affectedEquipment.LabId != bookedLabId.Value)
+                        {
+                            throw new ArgumentException(
+                                "Thiết bị bị ảnh hưởng không thuộc phòng/tài nguyên của BookingItem.");
+                        }
+                    }
+
+                    if (isEquipmentIncident && affectedEquipment is null)
+                    {
+                        throw new ArgumentException(
+                            "Không xác định được thiết bị bị ảnh hưởng.");
+                    }
+
+                    var oldValue = IncidentSnapshot(usageLog);
+
+                    usageLog.ReportIncident(
+                        request.IncidentStatus,
+                        request.IncidentDescription,
+                        affectedEquipmentId);
+
+                    if (isEquipmentIncident
+                        && affectedEquipment?.LabRoom?.ManagerId is int managerId)
                     {
                         await _unitOfWork.Notifications.AddAsync(
                             new Notification(
                                 managerId,
-                                "Thiết bị được báo cáo có sự cố",
-                                $"Thiết bị #{equipment.EquipmentId} - {equipment.EquipmentName} "
-                                + $"được báo cáo trong booking #{booking.BookingId}. "
-                                + "Thiết bị đã chuyển sang Broken.",
+                                "Sự cố thiết bị chờ xác nhận",
+                                $"Thiết bị #{affectedEquipment.EquipmentId} - "
+                                + $"{affectedEquipment.EquipmentName} được báo cáo "
+                                + $"trong booking #{booking.BookingId}. "
+                                + "Thiết bị chưa chuyển sang Broken cho tới khi LabManager xác nhận.",
                                 NotificationType.Maintenance),
-                            cancellationToken);
+                            ct);
                     }
-                }
-            }
 
-            _repository.Update(usageLog);
+                    _repository.Update(usageLog);
 
-            await _auditLogWriter.WriteAsync(
-                actorUserId: actor.UserId,
-                actionType: AuditActionType.Update,
-                entityName: nameof(UsageLog),
-                entityId: usageLog.LogId,
-                oldValue: oldValue,
-                newValue: new
-                {
-                    IncidentStatus = usageLog.IncidentStatus.ToString(),
-                    usageLog.IncidentDescription,
-                    Action = "ReportIncident"
+                    await _auditLogWriter.WriteAsync(
+                        actorUserId: actor.UserId,
+                        actionType: AuditActionType.Update,
+                        entityName: nameof(UsageLog),
+                        entityId: usageLog.LogId,
+                        oldValue: oldValue,
+                        newValue: new
+                        {
+                            Incident = IncidentSnapshot(usageLog),
+                            Action = "ReportIncident"
+                        },
+                        cancellationToken: ct);
+
+                    await _unitOfWork.SaveChangesAsync(ct);
+                    updatedLog = usageLog;
                 },
-                cancellationToken: cancellationToken);
+                cancellationToken);
 
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
-            return MapResponse(usageLog);
+            return MapResponse(updatedLog!);
+        }
+
+        public Task<UsageLogResponse> ConfirmIncidentAsync(
+            int logId,
+            ReviewUsageIncidentRequest request,
+            CancellationToken cancellationToken)
+        {
+            return ReviewIncidentAsync(
+                logId,
+                request,
+                confirm: true,
+                cancellationToken);
+        }
+
+        public Task<UsageLogResponse> RejectIncidentAsync(
+            int logId,
+            ReviewUsageIncidentRequest request,
+            CancellationToken cancellationToken)
+        {
+            return ReviewIncidentAsync(
+                logId,
+                request,
+                confirm: false,
+                cancellationToken);
+        }
+
+        private async Task<UsageLogResponse> ReviewIncidentAsync(
+            int logId,
+            ReviewUsageIncidentRequest request,
+            bool confirm,
+            CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+            UsageLog? updatedLog = null;
+
+            await _unitOfWork.ExecuteInSerializableTransactionAsync(
+                async ct =>
+                {
+                    var actor = await GetCurrentActiveUserAsync(ct);
+                    EnsureManagerOrAdmin(actor);
+
+                    var usageLog = await GetLogOrThrowAsync(logId, ct);
+                    var booking = await GetBookingForLogAsync(usageLog, ct);
+                    await EnsureCanReviewIncidentAsync(actor, booking, ct);
+
+                    var oldValue = IncidentSnapshot(usageLog);
+
+                    if (confirm)
+                    {
+                        if (!usageLog.AffectedEquipmentId.HasValue)
+                        {
+                            throw new InvalidOperationException(
+                                "Sự cố chưa xác định thiết bị bị ảnh hưởng.");
+                        }
+
+                        var equipment =
+                            await _unitOfWork.Equipments.GetDetailAsync(
+                                usageLog.AffectedEquipmentId.Value,
+                                ct)
+                            ?? throw new KeyNotFoundException(
+                                $"Không tìm thấy thiết bị có ID {usageLog.AffectedEquipmentId.Value}.");
+
+                        usageLog.ConfirmIncident(
+                            actor.UserId,
+                            request.ReviewNote);
+                        equipment.MarkBroken();
+                        _unitOfWork.Equipments.Update(equipment);
+                    }
+                    else
+                    {
+                        usageLog.RejectIncident(
+                            actor.UserId,
+                            request.ReviewNote);
+                    }
+
+                    _repository.Update(usageLog);
+
+                    await _unitOfWork.Notifications.AddAsync(
+                        new Notification(
+                            booking.UserId,
+                            confirm
+                                ? "Sự cố thiết bị đã được xác nhận"
+                                : "Báo cáo sự cố đã bị từ chối",
+                            confirm
+                                ? $"Sự cố tại UsageLog #{usageLog.LogId} đã được xác nhận; thiết bị chuyển sang Broken."
+                                : $"Sự cố tại UsageLog #{usageLog.LogId} không được LabManager xác nhận.",
+                            NotificationType.Maintenance),
+                        ct);
+
+                    await _auditLogWriter.WriteAsync(
+                        actorUserId: actor.UserId,
+                        actionType: AuditActionType.Update,
+                        entityName: nameof(UsageLog),
+                        entityId: usageLog.LogId,
+                        oldValue: oldValue,
+                        newValue: new
+                        {
+                            Incident = IncidentSnapshot(usageLog),
+                            Action = confirm
+                                ? "ConfirmIncident"
+                                : "RejectIncident"
+                        },
+                        cancellationToken: ct);
+
+                    await _unitOfWork.SaveChangesAsync(ct);
+                    updatedLog = usageLog;
+                },
+                cancellationToken);
+
+            return MapResponse(updatedLog!);
         }
 
         private async Task MarkResourceInUseAsync(
@@ -645,6 +774,43 @@ namespace Application.Services
             }
         }
 
+        private async Task EnsureCanReviewIncidentAsync(
+            User actor,
+            Booking booking,
+            CancellationToken cancellationToken)
+        {
+            if (actor.Role?.RoleName == RoleName.Admin)
+                return;
+
+            if (actor.Role?.RoleName == RoleName.LabManager)
+            {
+                var managedLabIds = await GetManagedLabIdsAsync(
+                    actor.UserId,
+                    cancellationToken);
+
+                if (BookingBelongsToManagedLabs(booking, managedLabIds))
+                    return;
+            }
+
+            throw new UnauthorizedAccessException(
+                "LabManager chỉ được xác nhận sự cố thuộc phòng mình quản lý.");
+        }
+
+        private static object IncidentSnapshot(UsageLog usageLog)
+        {
+            return new
+            {
+                IncidentStatus = usageLog.IncidentStatus.ToString(),
+                usageLog.IncidentDescription,
+                usageLog.AffectedEquipmentId,
+                IncidentReviewStatus =
+                    usageLog.IncidentReviewStatus.ToString(),
+                usageLog.IncidentReviewedById,
+                usageLog.IncidentReviewedAt,
+                usageLog.IncidentReviewNote
+            };
+        }
+
         private async Task EnsureCanAccessBookingAsync(
             User actor,
             Booking booking,
@@ -703,7 +869,13 @@ namespace Application.Services
                 ActualCheckin = usageLog.ActualCheckin,
                 ActualCheckout = usageLog.ActualCheckout,
                 IncidentStatus = usageLog.IncidentStatus.ToString(),
-                IncidentDescription = usageLog.IncidentDescription
+                IncidentDescription = usageLog.IncidentDescription,
+                AffectedEquipmentId = usageLog.AffectedEquipmentId,
+                IncidentReviewStatus =
+                    usageLog.IncidentReviewStatus.ToString(),
+                IncidentReviewedById = usageLog.IncidentReviewedById,
+                IncidentReviewedAt = usageLog.IncidentReviewedAt,
+                IncidentReviewNote = usageLog.IncidentReviewNote
             };
         }
     }

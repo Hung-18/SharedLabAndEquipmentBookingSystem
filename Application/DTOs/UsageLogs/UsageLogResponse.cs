@@ -17,6 +17,16 @@ namespace Application.DTOs.UsageLogs
         public string IncidentStatus { get; set; } = string.Empty;
 
         public string? IncidentDescription { get; set; }
+
+        public int? AffectedEquipmentId { get; set; }
+
+        public string IncidentReviewStatus { get; set; } = string.Empty;
+
+        public int? IncidentReviewedById { get; set; }
+
+        public DateTime? IncidentReviewedAt { get; set; }
+
+        public string? IncidentReviewNote { get; set; }
     }
 
 }
