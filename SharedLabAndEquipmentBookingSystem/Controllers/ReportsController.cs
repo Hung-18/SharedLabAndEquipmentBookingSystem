@@ -1,5 +1,20 @@
-﻿using Application.DTOs.Reports;
-using Application.Interfaces;
+using Application.DTOs.Reports;
+using Application.Features.Reports.Queries.GetBookingsByDepartment;
+using Application.Features.Reports.Queries.GetBookingsByPurpose;
+using Application.Features.Reports.Queries.GetBookingsByStatus;
+using Application.Features.Reports.Queries.GetDepartmentUtilization;
+using Application.Features.Reports.Queries.GetEquipmentUtilization;
+using Application.Features.Reports.Queries.GetLabUtilization;
+using Application.Features.Reports.Queries.GetMaintenanceCostsByEquipment;
+using Application.Features.Reports.Queries.GetMaintenanceCostsByLab;
+using Application.Features.Reports.Queries.GetMaintenanceHistory;
+using Application.Features.Reports.Queries.GetMostUsedEquipments;
+using Application.Features.Reports.Queries.GetMostUsedLabRooms;
+using Application.Features.Reports.Queries.GetNoShowRate;
+using Application.Features.Reports.Queries.GetPenaltyUsers;
+using Application.Features.Reports.Queries.GetUsageTrend;
+using Application.Features.Reports.Queries.GetViolations;
+using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -10,11 +25,10 @@ namespace API.Controllers
     [Authorize(Roles = "Admin,LabManager")]
     public class ReportsController : ControllerBase
     {
-        private readonly IReportService _service;
-
-        public ReportsController(IReportService service)
+        private readonly ISender _sender;
+        public ReportsController(ISender sender)
         {
-            _service = service;
+            _sender = sender;
         }
 
         [HttpGet("lab-utilization")]
@@ -23,7 +37,7 @@ namespace API.Controllers
             [FromQuery] DateTime to,
             CancellationToken cancellationToken)
         {
-            return Ok(await _service.GetLabUtilizationAsync(from, to, cancellationToken));
+            return Ok(await _sender.Send(new ReportGetLabUtilizationQuery(from, to), cancellationToken));
         }
 
         [HttpGet("equipment-utilization")]
@@ -32,7 +46,7 @@ namespace API.Controllers
             [FromQuery] DateTime to,
             CancellationToken cancellationToken)
         {
-            return Ok(await _service.GetEquipmentUtilizationAsync(from, to, cancellationToken));
+            return Ok(await _sender.Send(new ReportGetEquipmentUtilizationQuery(from, to), cancellationToken));
         }
 
         [HttpGet("bookings/by-department")]
@@ -41,7 +55,7 @@ namespace API.Controllers
             [FromQuery] DateTime to,
             CancellationToken cancellationToken)
         {
-            return Ok(await _service.GetBookingsByDepartmentAsync(from, to, cancellationToken));
+            return Ok(await _sender.Send(new ReportGetBookingsByDepartmentQuery(from, to), cancellationToken));
         }
 
         [HttpGet("department-utilization")]
@@ -53,10 +67,7 @@ namespace API.Controllers
             [FromQuery] DateTime to,
             CancellationToken cancellationToken)
         {
-            return Ok(await _service.GetDepartmentUtilizationAsync(
-                from,
-                to,
-                cancellationToken));
+            return Ok(await _sender.Send(new ReportGetDepartmentUtilizationQuery(from, to), cancellationToken));
         }
 
         [HttpGet("bookings/by-purpose")]
@@ -65,7 +76,7 @@ namespace API.Controllers
             [FromQuery] DateTime to,
             CancellationToken cancellationToken)
         {
-            return Ok(await _service.GetBookingsByPurposeAsync(from, to, cancellationToken));
+            return Ok(await _sender.Send(new ReportGetBookingsByPurposeQuery(from, to), cancellationToken));
         }
 
         [HttpGet("bookings/by-status")]
@@ -74,7 +85,7 @@ namespace API.Controllers
             [FromQuery] DateTime to,
             CancellationToken cancellationToken)
         {
-            return Ok(await _service.GetBookingsByStatusAsync(from, to, cancellationToken));
+            return Ok(await _sender.Send(new ReportGetBookingsByStatusQuery(from, to), cancellationToken));
         }
 
         [HttpGet("maintenance-costs/by-lab")]
@@ -83,7 +94,7 @@ namespace API.Controllers
             [FromQuery] DateTime to,
             CancellationToken cancellationToken)
         {
-            return Ok(await _service.GetMaintenanceCostsByLabAsync(from, to, cancellationToken));
+            return Ok(await _sender.Send(new ReportGetMaintenanceCostsByLabQuery(from, to), cancellationToken));
         }
 
         [HttpGet("maintenance-costs/by-equipment")]
@@ -92,7 +103,7 @@ namespace API.Controllers
             [FromQuery] DateTime to,
             CancellationToken cancellationToken)
         {
-            return Ok(await _service.GetMaintenanceCostsByEquipmentAsync(from, to, cancellationToken));
+            return Ok(await _sender.Send(new ReportGetMaintenanceCostsByEquipmentQuery(from, to), cancellationToken));
         }
 
         [HttpGet("maintenance-history")]
@@ -103,9 +114,7 @@ namespace API.Controllers
             [FromQuery] MaintenanceHistoryQueryRequest request,
             CancellationToken cancellationToken)
         {
-            return Ok(await _service.GetMaintenanceHistoryAsync(
-                request,
-                cancellationToken));
+            return Ok(await _sender.Send(new ReportGetMaintenanceHistoryQuery(request), cancellationToken));
         }
 
         [HttpGet("most-used/labs")]
@@ -115,7 +124,7 @@ namespace API.Controllers
             [FromQuery] int top = 10,
             CancellationToken cancellationToken = default)
         {
-            return Ok(await _service.GetMostUsedLabRoomsAsync(from, to, top, cancellationToken));
+            return Ok(await _sender.Send(new ReportGetMostUsedLabRoomsQuery(from, to, top), cancellationToken));
         }
 
         [HttpGet("most-used/equipments")]
@@ -125,7 +134,7 @@ namespace API.Controllers
             [FromQuery] int top = 10,
             CancellationToken cancellationToken = default)
         {
-            return Ok(await _service.GetMostUsedEquipmentsAsync(from, to, top, cancellationToken));
+            return Ok(await _sender.Send(new ReportGetMostUsedEquipmentsQuery(from, to, top), cancellationToken));
         }
 
         [HttpGet("violations")]
@@ -135,7 +144,7 @@ namespace API.Controllers
             [FromQuery] DateTime to,
             CancellationToken cancellationToken)
         {
-            return Ok(await _service.GetViolationsAsync(from, to, cancellationToken));
+            return Ok(await _sender.Send(new ReportGetViolationsQuery(from, to), cancellationToken));
         }
 
         [HttpGet("penalty-users")]
@@ -145,7 +154,7 @@ namespace API.Controllers
             [FromQuery] int top = 10,
             CancellationToken cancellationToken = default)
         {
-            return Ok(await _service.GetPenaltyUsersAsync(from, to, top, cancellationToken));
+            return Ok(await _sender.Send(new ReportGetPenaltyUsersQuery(from, to, top), cancellationToken));
         }
 
         [HttpGet("no-show-rate")]
@@ -154,7 +163,7 @@ namespace API.Controllers
             [FromQuery] DateTime to,
             CancellationToken cancellationToken)
         {
-            return Ok(await _service.GetNoShowRateAsync(from, to, cancellationToken));
+            return Ok(await _sender.Send(new ReportGetNoShowRateQuery(from, to), cancellationToken));
         }
 
         [HttpGet("usage-trend")]
@@ -164,7 +173,7 @@ namespace API.Controllers
             [FromQuery] string groupBy = "day",
             CancellationToken cancellationToken = default)
         {
-            return Ok(await _service.GetUsageTrendAsync(from, to, groupBy, cancellationToken));
+            return Ok(await _sender.Send(new ReportGetUsageTrendQuery(from, to, groupBy), cancellationToken));
         }
     }
 }

@@ -1,5 +1,7 @@
-﻿using Application.DTOs.Roles;
-using Application.Interfaces;
+using Application.DTOs.Roles;
+using Application.Features.Roles.Queries.GetAll;
+using Application.Features.Roles.Queries.GetById;
+using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -10,18 +12,17 @@ namespace API.Controllers
     [Authorize(Roles = "Admin")]
     public class RolesController : ControllerBase
     {
-        private readonly IRoleService _service;
-
-        public RolesController(IRoleService service)
+        private readonly ISender _sender;
+        public RolesController(ISender sender)
         {
-            _service = service;
+            _sender = sender;
         }
 
         [HttpGet]
         [ProducesResponseType(typeof(List<RoleResponse>), StatusCodes.Status200OK)]
         public async Task<IActionResult> GetAll(CancellationToken cancellationToken)
         {
-            return Ok(await _service.GetAllAsync(cancellationToken));
+            return Ok(await _sender.Send(new RoleGetAllQuery(), cancellationToken));
         }
 
         [HttpGet("{id:int}")]
@@ -31,7 +32,7 @@ namespace API.Controllers
             int id,
             CancellationToken cancellationToken)
         {
-            var result = await _service.GetByIdAsync(id, cancellationToken);
+            var result = await _sender.Send(new RoleGetByIdQuery(id), cancellationToken);
             return result is null ? NotFound() : Ok(result);
         }
     }

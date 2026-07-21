@@ -1,5 +1,18 @@
-﻿using Application.DTOs.Booking;
-using Application.Interfaces;
+using Application.DTOs.Booking;
+using Application.Features.Bookings.Commands.Approve;
+using Application.Features.Bookings.Commands.Cancel;
+using Application.Features.Bookings.Commands.Complete;
+using Application.Features.Bookings.Commands.Create;
+using Application.Features.Bookings.Commands.MarkNoShow;
+using Application.Features.Bookings.Commands.Reject;
+using Application.Features.Bookings.Commands.Update;
+using Application.Features.Bookings.Queries.GetAll;
+using Application.Features.Bookings.Queries.GetById;
+using Application.Features.Bookings.Queries.GetByUserId;
+using Application.Features.Bookings.Queries.GetCalendar;
+using Application.Features.Bookings.Queries.GetPending;
+using Application.Features.Bookings.Queries.SuggestAlternativeSlots;
+using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -10,11 +23,10 @@ namespace API.Controllers
     [Authorize]
     public class BookingsController : ControllerBase
     {
-        private readonly IBookingService _bookingService;
-
-        public BookingsController(IBookingService bookingService)
+        private readonly ISender _sender;
+        public BookingsController(ISender sender)
         {
-            _bookingService = bookingService;
+            _sender = sender;
         }
 
         [HttpGet]
@@ -22,7 +34,7 @@ namespace API.Controllers
         [ProducesResponseType(StatusCodes.Status200OK)]
         public async Task<IActionResult> GetAll(CancellationToken cancellationToken)
         {
-            return Ok(await _bookingService.GetAllAsync(cancellationToken));
+            return Ok(await _sender.Send(new BookingGetAllQuery(), cancellationToken));
         }
 
         [HttpGet("{id:int}")]
@@ -30,7 +42,7 @@ namespace API.Controllers
         [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> GetById(int id, CancellationToken cancellationToken)
         {
-            var result = await _bookingService.GetByIdAsync(id, cancellationToken);
+            var result = await _sender.Send(new BookingGetByIdQuery(id), cancellationToken);
             return result is null
                 ? NotFound($"Không tìm thấy booking có ID {id}.")
                 : Ok(result);
@@ -41,14 +53,14 @@ namespace API.Controllers
             int userId,
             CancellationToken cancellationToken)
         {
-            return Ok(await _bookingService.GetByUserIdAsync(userId, cancellationToken));
+            return Ok(await _sender.Send(new BookingGetByUserIdQuery(userId), cancellationToken));
         }
 
         [HttpGet("pending")]
         [Authorize(Roles = "Admin,LabManager")]
         public async Task<IActionResult> GetPending(CancellationToken cancellationToken)
         {
-            return Ok(await _bookingService.GetPendingAsync(cancellationToken));
+            return Ok(await _sender.Send(new BookingGetPendingQuery(), cancellationToken));
         }
 
         [HttpGet("calendar")]
@@ -60,12 +72,7 @@ namespace API.Controllers
             [FromQuery] int? equipmentId,
             CancellationToken cancellationToken)
         {
-            return Ok(await _bookingService.GetCalendarAsync(
-                from,
-                to,
-                labId,
-                equipmentId,
-                cancellationToken));
+            return Ok(await _sender.Send(new BookingGetCalendarQuery(from, to, labId, equipmentId), cancellationToken));
         }
 
         [HttpPost("suggested-slots")]
@@ -76,9 +83,7 @@ namespace API.Controllers
             [FromBody] AlternativeSlotRequest request,
             CancellationToken cancellationToken)
         {
-            return Ok(await _bookingService.SuggestAlternativeSlotsAsync(
-                request,
-                cancellationToken));
+            return Ok(await _sender.Send(new BookingSuggestAlternativeSlotsQuery(request), cancellationToken));
         }
 
         [HttpPost]
@@ -90,7 +95,7 @@ namespace API.Controllers
             [FromBody] CreateBookingRequest request,
             CancellationToken cancellationToken)
         {
-            var result = await _bookingService.CreateAsync(request, cancellationToken);
+            var result = await _sender.Send(new BookingCreateCommand(request), cancellationToken);
 
             return CreatedAtAction(
                 nameof(GetById),
@@ -105,7 +110,7 @@ namespace API.Controllers
             [FromBody] UpdateBookingRequest request,
             CancellationToken cancellationToken)
         {
-            await _bookingService.UpdateAsync(id, request, cancellationToken);
+            await _sender.Send(new BookingUpdateCommand(id, request), cancellationToken);
             return NoContent();
         }
 
@@ -116,7 +121,7 @@ namespace API.Controllers
             int id,
             CancellationToken cancellationToken)
         {
-            await _bookingService.ApproveAsync(id, cancellationToken);
+            await _sender.Send(new BookingApproveCommand(id), cancellationToken);
             return NoContent();
         }
 
@@ -128,7 +133,7 @@ namespace API.Controllers
             [FromBody] RejectBookingRequest request,
             CancellationToken cancellationToken)
         {
-            await _bookingService.RejectAsync(id, request, cancellationToken);
+            await _sender.Send(new BookingRejectCommand(id, request), cancellationToken);
             return NoContent();
         }
 
@@ -138,7 +143,7 @@ namespace API.Controllers
             int id,
             CancellationToken cancellationToken)
         {
-            await _bookingService.CancelAsync(id, cancellationToken);
+            await _sender.Send(new BookingCancelCommand(id), cancellationToken);
             return NoContent();
         }
 
@@ -149,7 +154,7 @@ namespace API.Controllers
             int id,
             CancellationToken cancellationToken)
         {
-            await _bookingService.CompleteAsync(id, cancellationToken);
+            await _sender.Send(new BookingCompleteCommand(id), cancellationToken);
             return NoContent();
         }
 
@@ -160,7 +165,7 @@ namespace API.Controllers
             int id,
             CancellationToken cancellationToken)
         {
-            await _bookingService.MarkNoShowAsync(id, cancellationToken);
+            await _sender.Send(new BookingMarkNoShowCommand(id), cancellationToken);
             return NoContent();
         }
     }

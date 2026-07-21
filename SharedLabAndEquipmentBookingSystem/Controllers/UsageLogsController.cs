@@ -1,5 +1,15 @@
-﻿using Application.DTOs.UsageLogs;
-using Application.Interfaces;
+using Application.DTOs.UsageLogs;
+using Application.Features.UsageLogs.Commands.CheckIn;
+using Application.Features.UsageLogs.Commands.CheckOut;
+using Application.Features.UsageLogs.Commands.ConfirmIncident;
+using Application.Features.UsageLogs.Commands.RejectIncident;
+using Application.Features.UsageLogs.Commands.ReportIncident;
+using Application.Features.UsageLogs.Queries.GetAll;
+using Application.Features.UsageLogs.Queries.GetByBookingId;
+using Application.Features.UsageLogs.Queries.GetByBookingItemId;
+using Application.Features.UsageLogs.Queries.GetById;
+using Application.Features.UsageLogs.Queries.GetIncidentLogs;
+using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -10,11 +20,10 @@ namespace API.Controllers
     [ApiController]
     public class UsageLogsController : ControllerBase
     {
-        private readonly IUsageLogService _usageLogService;
-
-        public UsageLogsController(IUsageLogService usageLogService)
+        private readonly ISender _sender;
+        public UsageLogsController(ISender sender)
         {
-            _usageLogService = usageLogService;
+            _sender = sender;
         }
 
         [Authorize(Roles = "Admin,LabManager")]
@@ -23,7 +32,7 @@ namespace API.Controllers
         public async Task<IActionResult> GetAll(
             CancellationToken cancellationToken)
         {
-            return Ok(await _usageLogService.GetAllAsync(cancellationToken));
+            return Ok(await _sender.Send(new UsageLogGetAllQuery(), cancellationToken));
         }
 
         [HttpGet("{id:int}")]
@@ -33,9 +42,7 @@ namespace API.Controllers
             int id,
             CancellationToken cancellationToken)
         {
-            var result = await _usageLogService.GetByIdAsync(
-                id,
-                cancellationToken);
+            var result = await _sender.Send(new UsageLogGetByIdQuery(id), cancellationToken);
 
             return result is null
                 ? NotFound($"Không tìm thấy UsageLog có ID {id}.")
@@ -47,9 +54,7 @@ namespace API.Controllers
             int bookingItemId,
             CancellationToken cancellationToken)
         {
-            return Ok(await _usageLogService.GetByBookingItemIdAsync(
-                bookingItemId,
-                cancellationToken));
+            return Ok(await _sender.Send(new UsageLogGetByBookingItemIdQuery(bookingItemId), cancellationToken));
         }
 
         [HttpGet("booking/{bookingId:int}")]
@@ -57,9 +62,7 @@ namespace API.Controllers
             int bookingId,
             CancellationToken cancellationToken)
         {
-            return Ok(await _usageLogService.GetByBookingIdAsync(
-                bookingId,
-                cancellationToken));
+            return Ok(await _sender.Send(new UsageLogGetByBookingIdQuery(bookingId), cancellationToken));
         }
 
         [Authorize(Roles = "Admin,LabManager")]
@@ -69,10 +72,7 @@ namespace API.Controllers
             [FromQuery] DateTime? to,
             CancellationToken cancellationToken)
         {
-            return Ok(await _usageLogService.GetIncidentLogsAsync(
-                from,
-                to,
-                cancellationToken));
+            return Ok(await _sender.Send(new UsageLogGetIncidentLogsQuery(from, to), cancellationToken));
         }
 
         [HttpPost("check-in")]
@@ -83,9 +83,7 @@ namespace API.Controllers
             [FromBody] CheckInUsageRequest request,
             CancellationToken cancellationToken)
         {
-            var result = await _usageLogService.CheckInAsync(
-                request,
-                cancellationToken);
+            var result = await _sender.Send(new UsageLogCheckInCommand(request), cancellationToken);
 
             return CreatedAtAction(
                 nameof(GetById),
@@ -99,10 +97,7 @@ namespace API.Controllers
             [FromBody] CheckOutUsageRequest request,
             CancellationToken cancellationToken)
         {
-            return Ok(await _usageLogService.CheckOutAsync(
-                id,
-                request,
-                cancellationToken));
+            return Ok(await _sender.Send(new UsageLogCheckOutCommand(id, request), cancellationToken));
         }
 
         [HttpPost("{id:int}/incident")]
@@ -111,10 +106,7 @@ namespace API.Controllers
             [FromBody] ReportUsageIncidentRequest request,
             CancellationToken cancellationToken)
         {
-            return Ok(await _usageLogService.ReportIncidentAsync(
-                id,
-                request,
-                cancellationToken));
+            return Ok(await _sender.Send(new UsageLogReportIncidentCommand(id, request), cancellationToken));
         }
 
 
@@ -125,10 +117,7 @@ namespace API.Controllers
             [FromBody] ReviewUsageIncidentRequest request,
             CancellationToken cancellationToken)
         {
-            return Ok(await _usageLogService.ConfirmIncidentAsync(
-                id,
-                request,
-                cancellationToken));
+            return Ok(await _sender.Send(new UsageLogConfirmIncidentCommand(id, request), cancellationToken));
         }
 
         [Authorize(Roles = "Admin,LabManager")]
@@ -138,10 +127,7 @@ namespace API.Controllers
             [FromBody] ReviewUsageIncidentRequest request,
             CancellationToken cancellationToken)
         {
-            return Ok(await _usageLogService.RejectIncidentAsync(
-                id,
-                request,
-                cancellationToken));
+            return Ok(await _sender.Send(new UsageLogRejectIncidentCommand(id, request), cancellationToken));
         }
     }
 }

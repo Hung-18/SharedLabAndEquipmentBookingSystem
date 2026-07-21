@@ -1,5 +1,12 @@
-﻿using Application.DTOs.LabRooms;
-using Application.Interfaces;
+using Application.DTOs.LabRooms;
+using Application.Features.LabRooms.Commands.ChangeManager;
+using Application.Features.LabRooms.Commands.Create;
+using Application.Features.LabRooms.Commands.Delete;
+using Application.Features.LabRooms.Commands.Update;
+using Application.Features.LabRooms.Queries.GetAll;
+using Application.Features.LabRooms.Queries.GetById;
+using Application.Features.LabRooms.Queries.Search;
+using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -10,23 +17,26 @@ namespace API.Controllers
     [ApiController]
     public class LabRoomsController : ControllerBase
     {
-        private readonly ILabRoomService _labRoomService;
-        public LabRoomsController(ILabRoomService labRoomService) => _labRoomService = labRoomService;
+        private readonly ISender _sender;
+        public LabRoomsController(ISender sender)
+        {
+            _sender = sender;
+        }
 
         [HttpGet]
         public async Task<IActionResult> GetAll(CancellationToken cancellationToken) =>
-            Ok(await _labRoomService.GetAllAsync(cancellationToken));
+            Ok(await _sender.Send(new LabRoomGetAllQuery(), cancellationToken));
 
         [HttpGet("search")]
         public async Task<IActionResult> Search(
             [FromQuery] LabRoomSearchRequest request,
             CancellationToken cancellationToken) =>
-            Ok(await _labRoomService.SearchAsync(request, cancellationToken));
+            Ok(await _sender.Send(new LabRoomSearchQuery(request), cancellationToken));
 
         [HttpGet("{id:int}")]
         public async Task<IActionResult> GetById(int id, CancellationToken cancellationToken)
         {
-            var room = await _labRoomService.GetByIdAsync(id, cancellationToken);
+            var room = await _sender.Send(new LabRoomGetByIdQuery(id), cancellationToken);
             return room is null ? NotFound($"Không tìm thấy phòng lab có ID {id}.") : Ok(room);
         }
 
@@ -36,7 +46,7 @@ namespace API.Controllers
             [FromBody] CreateLabRoomRequest request,
             CancellationToken cancellationToken)
         {
-            var result = await _labRoomService.CreateAsync(request, cancellationToken);
+            var result = await _sender.Send(new LabRoomCreateCommand(request), cancellationToken);
             return CreatedAtAction(nameof(GetById), new { id = result.LabId }, result);
         }
 
@@ -47,7 +57,7 @@ namespace API.Controllers
             [FromBody] UpdateLabRoomRequest request,
             CancellationToken cancellationToken)
         {
-            await _labRoomService.UpdateAsync(id, request, cancellationToken);
+            await _sender.Send(new LabRoomUpdateCommand(id, request), cancellationToken);
             return NoContent();
         }
 
@@ -58,7 +68,7 @@ namespace API.Controllers
             [FromBody] ChangeLabRoomManagerRequest request,
             CancellationToken cancellationToken)
         {
-            await _labRoomService.ChangeManagerAsync(id, request, cancellationToken);
+            await _sender.Send(new LabRoomChangeManagerCommand(id, request), cancellationToken);
             return NoContent();
         }
 
@@ -66,7 +76,7 @@ namespace API.Controllers
         [HttpDelete("{id:int}")]
         public async Task<IActionResult> Delete(int id, CancellationToken cancellationToken)
         {
-            await _labRoomService.DeleteAsync(id, cancellationToken);
+            await _sender.Send(new LabRoomDeleteCommand(id), cancellationToken);
             return NoContent();
         }
     }

@@ -1,5 +1,6 @@
-﻿using Application.DTOs.Reports;
-using Application.Interfaces;
+using Application.DTOs.Reports;
+using Application.Features.Reports.Queries.GetDashboard;
+using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -10,11 +11,10 @@ namespace API.Controllers
     [Authorize(Roles = "Admin,LabManager")]
     public class DashboardController : ControllerBase
     {
-        private readonly IReportService _service;
-
-        public DashboardController(IReportService service)
+        private readonly ISender _sender;
+        public DashboardController(ISender sender)
         {
-            _service = service;
+            _sender = sender;
         }
 
         [HttpGet]
@@ -27,10 +27,7 @@ namespace API.Controllers
             DateTime resolvedTo = to ?? DateTime.UtcNow;
             DateTime resolvedFrom = from ?? resolvedTo.AddDays(-30);
 
-            return Ok(await _service.GetDashboardAsync(
-                resolvedFrom,
-                resolvedTo,
-                cancellationToken));
+            return Ok(await _sender.Send(new ReportGetDashboardQuery(resolvedFrom, resolvedTo), cancellationToken));
         }
     }
 }
