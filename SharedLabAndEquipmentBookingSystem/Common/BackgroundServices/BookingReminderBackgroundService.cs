@@ -2,7 +2,7 @@
 using Domain.Entities;
 using Domain.Interfaces;
 
-namespace API.BackgroundServices
+namespace API.Common.BackgroundServices
 {
     public class BookingReminderBackgroundService
         : BackgroundService

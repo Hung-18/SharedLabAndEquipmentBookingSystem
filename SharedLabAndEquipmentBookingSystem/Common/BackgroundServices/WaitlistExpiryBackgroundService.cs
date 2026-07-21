@@ -1,6 +1,6 @@
 ﻿using Application.Interfaces;
 
-namespace API.BackgroundServices
+namespace API.Common.BackgroundServices
 {
     public sealed class WaitlistExpiryBackgroundService : BackgroundService
     {

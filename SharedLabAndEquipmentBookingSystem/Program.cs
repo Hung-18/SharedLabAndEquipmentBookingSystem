@@ -1,5 +1,5 @@
-using API.BackgroundServices;
-using API.Middleware;
+using API.Common.BackgroundServices;
+using API.Common.Middleware;
 using Application.DI;
 using Infrastructure.AppDbContext;
 using Infrastructure.Repository;

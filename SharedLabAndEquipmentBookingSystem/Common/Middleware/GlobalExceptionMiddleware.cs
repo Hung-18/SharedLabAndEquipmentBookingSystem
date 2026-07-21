@@ -6,7 +6,7 @@ using Microsoft.Extensions.Logging;
 using System.Net;
 using System.Text.Json;
 
-namespace API.Middleware
+namespace API.Common.Middleware
 {
     public class GlobalExceptionMiddleware
     {
