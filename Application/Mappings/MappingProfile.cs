@@ -1,4 +1,5 @@
 ﻿using Application.DTOs.Auth;
+using Application.DTOs.Booking;
 using AutoMapper;
 using Domain.Entities;
 using System;

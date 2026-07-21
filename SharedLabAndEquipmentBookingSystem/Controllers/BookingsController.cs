@@ -1,3 +1,4 @@
+using Application.DTOs;
 using Application.DTOs.Booking;
 using Application.Features.Bookings.Commands.Approve;
 using Application.Features.Bookings.Commands.Cancel;
@@ -18,6 +19,7 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace API.Controllers
 {
+    [Authorize]
     [Route("api/[controller]")]
     [ApiController]
     [Authorize]
@@ -168,5 +170,7 @@ namespace API.Controllers
             await _sender.Send(new BookingMarkNoShowCommand(id), cancellationToken);
             return NoContent();
         }
+
+        
     }
 }

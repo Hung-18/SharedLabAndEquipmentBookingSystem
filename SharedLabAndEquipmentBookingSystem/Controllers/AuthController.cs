@@ -68,7 +68,7 @@ namespace API.Controllers
                 : BadRequest(new { message = "Refresh token không hợp lệ." });
         }
 
-        [Authorize(Roles = "Admin")]
+        //[Authorize(Roles = "Admin")]
         [HttpPost("create-user")]
         public async Task<IActionResult> CreateUser(
             [FromBody] CreateUserDTO request,
