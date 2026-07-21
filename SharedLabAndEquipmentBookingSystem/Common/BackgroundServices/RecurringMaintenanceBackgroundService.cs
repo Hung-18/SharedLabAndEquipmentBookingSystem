@@ -3,7 +3,7 @@ using Domain.Entities;
 using Domain.Interfaces;
 using Microsoft.EntityFrameworkCore;
 
-namespace API.BackgroundServices
+namespace API.Common.BackgroundServices
 {
     public sealed class RecurringMaintenanceBackgroundService : BackgroundService
     {

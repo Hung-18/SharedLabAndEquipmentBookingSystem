@@ -1,6 +1,17 @@
-﻿using Application.DTOs.Users;
-using Application.Interfaces;
+using Application.DTOs.Users;
 using Domain;
+using Application.Features.Users.Commands.Activate;
+using Application.Features.Users.Commands.ChangeDepartment;
+using Application.Features.Users.Commands.ChangeRole;
+using Application.Features.Users.Commands.Deactivate;
+using Application.Features.Users.Commands.Lock;
+using Application.Features.Users.Commands.SetStatus;
+using Application.Features.Users.Commands.Unlock;
+using Application.Features.Users.Commands.Update;
+using Application.Features.Users.Queries.GetById;
+using Application.Features.Users.Queries.GetPenalty;
+using Application.Features.Users.Queries.Search;
+using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -11,11 +22,10 @@ namespace API.Controllers
     [Authorize(Roles = "Admin")]
     public class UsersController : ControllerBase
     {
-        private readonly IUserManagementService _service;
-
-        public UsersController(IUserManagementService service)
+        private readonly ISender _sender;
+        public UsersController(ISender sender)
         {
-            _service = service;
+            _sender = sender;
         }
 
         [HttpGet]
@@ -29,14 +39,7 @@ namespace API.Controllers
             [FromQuery] int pageSize = 20,
             CancellationToken cancellationToken = default)
         {
-            return Ok(await _service.SearchAsync(
-                keyword,
-                roleName,
-                departmentId,
-                status,
-                pageNumber,
-                pageSize,
-                cancellationToken));
+            return Ok(await _sender.Send(new UserManagementSearchQuery(keyword, roleName, departmentId, status, pageNumber, pageSize), cancellationToken));
         }
 
         [HttpGet("{id:int}")]
@@ -46,7 +49,7 @@ namespace API.Controllers
             int id,
             CancellationToken cancellationToken)
         {
-            var result = await _service.GetByIdAsync(id, cancellationToken);
+            var result = await _sender.Send(new UserManagementGetByIdQuery(id), cancellationToken);
             return result is null ? NotFound() : Ok(result);
         }
 
@@ -57,7 +60,7 @@ namespace API.Controllers
             [FromBody] UpdateUserRequest request,
             CancellationToken cancellationToken)
         {
-            return Ok(await _service.UpdateAsync(id, request, cancellationToken));
+            return Ok(await _sender.Send(new UserManagementUpdateCommand(id, request), cancellationToken));
         }
 
         [HttpPut("{id:int}/role")]
@@ -67,7 +70,7 @@ namespace API.Controllers
             [FromBody] ChangeUserRoleRequest request,
             CancellationToken cancellationToken)
         {
-            return Ok(await _service.ChangeRoleAsync(id, request, cancellationToken));
+            return Ok(await _sender.Send(new UserManagementChangeRoleCommand(id, request), cancellationToken));
         }
 
         [HttpPut("{id:int}/department")]
@@ -77,7 +80,7 @@ namespace API.Controllers
             [FromBody] ChangeUserDepartmentRequest request,
             CancellationToken cancellationToken)
         {
-            return Ok(await _service.ChangeDepartmentAsync(id, request, cancellationToken));
+            return Ok(await _sender.Send(new UserManagementChangeDepartmentCommand(id, request), cancellationToken));
         }
 
         [HttpPost("{id:int}/lock")]
@@ -85,7 +88,7 @@ namespace API.Controllers
             int id,
             CancellationToken cancellationToken)
         {
-            return Ok(await _service.LockAsync(id, cancellationToken));
+            return Ok(await _sender.Send(new UserManagementLockCommand(id), cancellationToken));
         }
 
         [HttpPost("{id:int}/unlock")]
@@ -93,7 +96,7 @@ namespace API.Controllers
             int id,
             CancellationToken cancellationToken)
         {
-            return Ok(await _service.UnlockAsync(id, cancellationToken));
+            return Ok(await _sender.Send(new UserManagementUnlockCommand(id), cancellationToken));
         }
 
         [HttpPost("{id:int}/deactivate")]
@@ -101,7 +104,7 @@ namespace API.Controllers
             int id,
             CancellationToken cancellationToken)
         {
-            return Ok(await _service.DeactivateAsync(id, cancellationToken));
+            return Ok(await _sender.Send(new UserManagementDeactivateCommand(id), cancellationToken));
         }
 
         [HttpPost("{id:int}/activate")]
@@ -109,7 +112,7 @@ namespace API.Controllers
             int id,
             CancellationToken cancellationToken)
         {
-            return Ok(await _service.ActivateAsync(id, cancellationToken));
+            return Ok(await _sender.Send(new UserManagementActivateCommand(id), cancellationToken));
         }
 
         [HttpPut("{id:int}/status")]
@@ -118,7 +121,7 @@ namespace API.Controllers
             [FromBody] SetUserStatusRequest request,
             CancellationToken cancellationToken)
         {
-            return Ok(await _service.SetStatusAsync(id, request, cancellationToken));
+            return Ok(await _sender.Send(new UserManagementSetStatusCommand(id, request), cancellationToken));
         }
 
         [HttpGet("{id:int}/penalty")]
@@ -127,7 +130,7 @@ namespace API.Controllers
             int id,
             CancellationToken cancellationToken)
         {
-            return Ok(await _service.GetPenaltyAsync(id, cancellationToken));
+            return Ok(await _sender.Send(new UserManagementGetPenaltyQuery(id), cancellationToken));
         }
     }
 }

@@ -1,5 +1,12 @@
-﻿using Application.DTOs.Equipments;
-using Application.Interfaces;
+using Application.DTOs.Equipments;
+using Application.Features.Equipments.Commands.Create;
+using Application.Features.Equipments.Commands.Delete;
+using Application.Features.Equipments.Commands.Update;
+using Application.Features.Equipments.Queries.GetAll;
+using Application.Features.Equipments.Queries.GetById;
+using Application.Features.Equipments.Queries.GetByLabId;
+using Application.Features.Equipments.Queries.Search;
+using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -10,29 +17,32 @@ namespace API.Controllers
     [ApiController]
     public class EquipmentsController : ControllerBase
     {
-        private readonly IEquipmentService _equipmentService;
-        public EquipmentsController(IEquipmentService equipmentService) => _equipmentService = equipmentService;
+        private readonly ISender _sender;
+        public EquipmentsController(ISender sender)
+        {
+            _sender = sender;
+        }
 
         [HttpGet]
         public async Task<IActionResult> GetAll(CancellationToken cancellationToken) =>
-            Ok(await _equipmentService.GetAllAsync(cancellationToken));
+            Ok(await _sender.Send(new EquipmentGetAllQuery(), cancellationToken));
 
         [HttpGet("search")]
         public async Task<IActionResult> Search(
             [FromQuery] EquipmentSearchRequest request,
             CancellationToken cancellationToken) =>
-            Ok(await _equipmentService.SearchAsync(request, cancellationToken));
+            Ok(await _sender.Send(new EquipmentSearchQuery(request), cancellationToken));
 
         [HttpGet("{id:int}")]
         public async Task<IActionResult> GetById(int id, CancellationToken cancellationToken)
         {
-            var result = await _equipmentService.GetByIdAsync(id, cancellationToken);
+            var result = await _sender.Send(new EquipmentGetByIdQuery(id), cancellationToken);
             return result is null ? NotFound($"Không tìm thấy thiết bị có ID {id}.") : Ok(result);
         }
 
         [HttpGet("lab/{labId:int}")]
         public async Task<IActionResult> GetByLabId(int labId, CancellationToken cancellationToken) =>
-            Ok(await _equipmentService.GetByLabIdAsync(labId, cancellationToken));
+            Ok(await _sender.Send(new EquipmentGetByLabIdQuery(labId), cancellationToken));
 
         [Authorize(Roles = "Admin")]
         [HttpPost]
@@ -40,7 +50,7 @@ namespace API.Controllers
             [FromBody] CreateEquipmentRequest request,
             CancellationToken cancellationToken)
         {
-            var result = await _equipmentService.CreateAsync(request, cancellationToken);
+            var result = await _sender.Send(new EquipmentCreateCommand(request), cancellationToken);
             return CreatedAtAction(nameof(GetById), new { id = result.EquipmentId }, result);
         }
 
@@ -51,7 +61,7 @@ namespace API.Controllers
             [FromBody] UpdateEquipmentRequest request,
             CancellationToken cancellationToken)
         {
-            await _equipmentService.UpdateAsync(id, request, cancellationToken);
+            await _sender.Send(new EquipmentUpdateCommand(id, request), cancellationToken);
             return NoContent();
         }
 
@@ -59,7 +69,7 @@ namespace API.Controllers
         [HttpDelete("{id:int}")]
         public async Task<IActionResult> Delete(int id, CancellationToken cancellationToken)
         {
-            await _equipmentService.DeleteAsync(id, cancellationToken);
+            await _sender.Send(new EquipmentDeleteCommand(id), cancellationToken);
             return NoContent();
         }
     }

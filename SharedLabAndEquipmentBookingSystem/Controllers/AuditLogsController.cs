@@ -1,5 +1,7 @@
-﻿using Application.DTOs.AuditLogs;
-using Application.Interfaces;
+using Application.DTOs.AuditLogs;
+using Application.Features.AuditLogs.Queries.GetById;
+using Application.Features.AuditLogs.Queries.Search;
+using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
@@ -12,11 +14,10 @@ namespace API.Controllers
     [ApiController]
     public class AuditLogsController : ControllerBase
     {
-        private readonly IAuditLogService _auditLogService;
-
-        public AuditLogsController(IAuditLogService auditLogService)
+        private readonly ISender _sender;
+        public AuditLogsController(ISender sender)
         {
-            _auditLogService = auditLogService;
+            _sender = sender;
         }
 
         [HttpGet]
@@ -24,7 +25,7 @@ namespace API.Controllers
             [FromQuery] AuditLogQueryRequest request,
             CancellationToken cancellationToken)
         {
-            return Ok(await _auditLogService.SearchAsync(request, cancellationToken));
+            return Ok(await _sender.Send(new AuditLogSearchQuery(request), cancellationToken));
         }
 
         [HttpGet("{id:int}")]
@@ -32,7 +33,7 @@ namespace API.Controllers
             int id,
             CancellationToken cancellationToken)
         {
-            var result = await _auditLogService.GetByIdAsync(id, cancellationToken);
+            var result = await _sender.Send(new AuditLogGetByIdQuery(id), cancellationToken);
             return result is null
                 ? NotFound($"Không tìm thấy AuditLog có ID {id}.")
                 : Ok(result);

@@ -1,5 +1,14 @@
-﻿using Application.DTOs.Waitlists;
-using Application.Interfaces;
+using Application.DTOs.Waitlists;
+using Application.Features.Waitlists.Commands.Cancel;
+using Application.Features.Waitlists.Commands.Create;
+using Application.Features.Waitlists.Commands.Expire;
+using Application.Features.Waitlists.Commands.MarkBooked;
+using Application.Features.Waitlists.Commands.NotifyNext;
+using Application.Features.Waitlists.Queries.GetAll;
+using Application.Features.Waitlists.Queries.GetById;
+using Application.Features.Waitlists.Queries.GetByUserId;
+using Application.Features.Waitlists.Queries.GetQueue;
+using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -10,18 +19,17 @@ namespace API.Controllers
     [Authorize]
     public class WaitlistsController : ControllerBase
     {
-        private readonly IWaitlistService _waitlistService;
-
-        public WaitlistsController(IWaitlistService waitlistService)
+        private readonly ISender _sender;
+        public WaitlistsController(ISender sender)
         {
-            _waitlistService = waitlistService;
+            _sender = sender;
         }
 
         [HttpGet]
         [Authorize(Roles = "Admin,LabManager")]
         public async Task<IActionResult> GetAll(CancellationToken cancellationToken)
         {
-            return Ok(await _waitlistService.GetAllAsync(cancellationToken));
+            return Ok(await _sender.Send(new WaitlistGetAllQuery(), cancellationToken));
         }
 
         [HttpGet("{id:int}")]
@@ -29,7 +37,7 @@ namespace API.Controllers
             int id,
             CancellationToken cancellationToken)
         {
-            var result = await _waitlistService.GetByIdAsync(id, cancellationToken);
+            var result = await _sender.Send(new WaitlistGetByIdQuery(id), cancellationToken);
             return result is null
                 ? NotFound($"Không tìm thấy hàng đợi có ID {id}.")
                 : Ok(result);
@@ -40,7 +48,7 @@ namespace API.Controllers
             int userId,
             CancellationToken cancellationToken)
         {
-            return Ok(await _waitlistService.GetByUserIdAsync(userId, cancellationToken));
+            return Ok(await _sender.Send(new WaitlistGetByUserIdQuery(userId), cancellationToken));
         }
 
         [HttpGet("queue")]
@@ -52,12 +60,7 @@ namespace API.Controllers
             [FromQuery] DateTime requestedEnd,
             CancellationToken cancellationToken)
         {
-            return Ok(await _waitlistService.GetQueueAsync(
-                labId,
-                equipmentId,
-                requestedStart,
-                requestedEnd,
-                cancellationToken));
+            return Ok(await _sender.Send(new WaitlistGetQueueQuery(labId, equipmentId, requestedStart, requestedEnd), cancellationToken));
         }
 
         [HttpPost]
@@ -65,7 +68,7 @@ namespace API.Controllers
             [FromBody] CreateWaitlistRequest request,
             CancellationToken cancellationToken)
         {
-            var result = await _waitlistService.CreateAsync(request, cancellationToken);
+            var result = await _sender.Send(new WaitlistCreateCommand(request), cancellationToken);
             return CreatedAtAction(nameof(GetById), new { id = result.WaitlistId }, result);
         }
 
@@ -75,7 +78,7 @@ namespace API.Controllers
             [FromBody] NotifyNextWaitlistRequest request,
             CancellationToken cancellationToken)
         {
-            return Ok(await _waitlistService.NotifyNextAsync(request, cancellationToken));
+            return Ok(await _sender.Send(new WaitlistNotifyNextCommand(request), cancellationToken));
         }
 
         [HttpPost("{id:int}/booked")]
@@ -83,7 +86,7 @@ namespace API.Controllers
             int id,
             CancellationToken cancellationToken)
         {
-            await _waitlistService.MarkBookedAsync(id, cancellationToken);
+            await _sender.Send(new WaitlistMarkBookedCommand(id), cancellationToken);
             return NoContent();
         }
 
@@ -92,7 +95,7 @@ namespace API.Controllers
             int id,
             CancellationToken cancellationToken)
         {
-            await _waitlistService.CancelAsync(id, cancellationToken);
+            await _sender.Send(new WaitlistCancelCommand(id), cancellationToken);
             return NoContent();
         }
 
@@ -102,7 +105,7 @@ namespace API.Controllers
             int id,
             CancellationToken cancellationToken)
         {
-            await _waitlistService.ExpireAsync(id, cancellationToken);
+            await _sender.Send(new WaitlistExpireCommand(id), cancellationToken);
             return NoContent();
         }
     }

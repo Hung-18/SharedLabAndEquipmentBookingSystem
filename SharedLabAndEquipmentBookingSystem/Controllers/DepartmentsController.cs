@@ -1,5 +1,11 @@
-﻿using Application.DTOs.Departments;
-using Application.Interfaces;
+using Application.DTOs.Departments;
+using Application.Features.Departments.Commands.Activate;
+using Application.Features.Departments.Commands.Create;
+using Application.Features.Departments.Commands.Deactivate;
+using Application.Features.Departments.Commands.Update;
+using Application.Features.Departments.Queries.GetAll;
+using Application.Features.Departments.Queries.GetById;
+using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -10,11 +16,10 @@ namespace API.Controllers
     [Authorize]
     public class DepartmentsController : ControllerBase
     {
-        private readonly IDepartmentService _service;
-
-        public DepartmentsController(IDepartmentService service)
+        private readonly ISender _sender;
+        public DepartmentsController(ISender sender)
         {
-            _service = service;
+            _sender = sender;
         }
 
         [HttpGet]
@@ -23,7 +28,7 @@ namespace API.Controllers
             [FromQuery] bool activeOnly = false,
             CancellationToken cancellationToken = default)
         {
-            return Ok(await _service.GetAllAsync(activeOnly, cancellationToken));
+            return Ok(await _sender.Send(new DepartmentGetAllQuery(activeOnly), cancellationToken));
         }
 
         [HttpGet("{id:int}")]
@@ -33,7 +38,7 @@ namespace API.Controllers
             int id,
             CancellationToken cancellationToken)
         {
-            var result = await _service.GetByIdAsync(id, cancellationToken);
+            var result = await _sender.Send(new DepartmentGetByIdQuery(id), cancellationToken);
             return result is null ? NotFound() : Ok(result);
         }
 
@@ -44,7 +49,7 @@ namespace API.Controllers
             [FromBody] CreateDepartmentRequest request,
             CancellationToken cancellationToken)
         {
-            var result = await _service.CreateAsync(request, cancellationToken);
+            var result = await _sender.Send(new DepartmentCreateCommand(request), cancellationToken);
             return CreatedAtAction(nameof(GetById), new { id = result.DepartmentId }, result);
         }
 
@@ -56,7 +61,7 @@ namespace API.Controllers
             [FromBody] UpdateDepartmentRequest request,
             CancellationToken cancellationToken)
         {
-            return Ok(await _service.UpdateAsync(id, request, cancellationToken));
+            return Ok(await _sender.Send(new DepartmentUpdateCommand(id, request), cancellationToken));
         }
 
         [HttpDelete("{id:int}")]
@@ -66,7 +71,7 @@ namespace API.Controllers
             int id,
             CancellationToken cancellationToken)
         {
-            await _service.DeactivateAsync(id, cancellationToken);
+            await _sender.Send(new DepartmentDeactivateCommand(id), cancellationToken);
             return NoContent();
         }
 
@@ -77,7 +82,7 @@ namespace API.Controllers
             int id,
             CancellationToken cancellationToken)
         {
-            return Ok(await _service.ActivateAsync(id, cancellationToken));
+            return Ok(await _sender.Send(new DepartmentActivateCommand(id), cancellationToken));
         }
     }
 }

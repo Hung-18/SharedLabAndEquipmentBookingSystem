@@ -1,5 +1,11 @@
-﻿using Application.DTOs.Notifications;
-using Application.Interfaces;
+using Application.DTOs.Notifications;
+using Application.Features.Notifications.Commands.MarkAllAsRead;
+using Application.Features.Notifications.Commands.MarkAsRead;
+using Application.Features.Notifications.Commands.Send;
+using Application.Features.Notifications.Queries.CountUnread;
+using Application.Features.Notifications.Queries.GetByUserId;
+using Application.Features.Notifications.Queries.GetUnreadByUserId;
+using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -10,11 +16,10 @@ namespace API.Controllers
     [ApiController]
     public class NotificationsController : ControllerBase
     {
-        private readonly INotificationService _notificationService;
-
-        public NotificationsController(INotificationService notificationService)
+        private readonly ISender _sender;
+        public NotificationsController(ISender sender)
         {
-            _notificationService = notificationService;
+            _sender = sender;
         }
 
         [HttpGet("user/{userId:int}")]
@@ -24,11 +29,7 @@ namespace API.Controllers
             [FromQuery] int pageSize = 20,
             CancellationToken cancellationToken = default)
         {
-            return Ok(await _notificationService.GetByUserIdAsync(
-                userId,
-                pageNumber,
-                pageSize,
-                cancellationToken));
+            return Ok(await _sender.Send(new NotificationGetByUserIdQuery(userId, pageNumber, pageSize), cancellationToken));
         }
 
         [HttpGet("user/{userId:int}/unread")]
@@ -36,9 +37,7 @@ namespace API.Controllers
             int userId,
             CancellationToken cancellationToken)
         {
-            return Ok(await _notificationService.GetUnreadByUserIdAsync(
-                userId,
-                cancellationToken));
+            return Ok(await _sender.Send(new NotificationGetUnreadByUserIdQuery(userId), cancellationToken));
         }
 
         [HttpGet("user/{userId:int}/unread-count")]
@@ -46,9 +45,7 @@ namespace API.Controllers
             int userId,
             CancellationToken cancellationToken)
         {
-            return Ok(await _notificationService.CountUnreadAsync(
-                userId,
-                cancellationToken));
+            return Ok(await _sender.Send(new NotificationCountUnreadQuery(userId), cancellationToken));
         }
 
         [Authorize(Roles = "Admin")]
@@ -57,7 +54,7 @@ namespace API.Controllers
             [FromBody] SendNotificationRequest request,
             CancellationToken cancellationToken)
         {
-            var result = await _notificationService.SendAsync(request, cancellationToken);
+            var result = await _sender.Send(new NotificationSendCommand(request), cancellationToken);
             return StatusCode(StatusCodes.Status201Created, result);
         }
 
@@ -66,7 +63,7 @@ namespace API.Controllers
             int id,
             CancellationToken cancellationToken)
         {
-            await _notificationService.MarkAsReadAsync(id, cancellationToken);
+            await _sender.Send(new NotificationMarkAsReadCommand(id), cancellationToken);
             return NoContent();
         }
 
@@ -75,7 +72,7 @@ namespace API.Controllers
             int userId,
             CancellationToken cancellationToken)
         {
-            await _notificationService.MarkAllAsReadAsync(userId, cancellationToken);
+            await _sender.Send(new NotificationMarkAllAsReadCommand(userId), cancellationToken);
             return NoContent();
         }
     }

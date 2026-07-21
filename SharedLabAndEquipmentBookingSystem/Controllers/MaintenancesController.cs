@@ -1,5 +1,15 @@
-﻿using Application.DTOs.Maintenances;
-using Application.Interfaces;
+using Application.DTOs.Maintenances;
+using Application.Features.Maintenances.Commands.Cancel;
+using Application.Features.Maintenances.Commands.CancelSeries;
+using Application.Features.Maintenances.Commands.Complete;
+using Application.Features.Maintenances.Commands.Create;
+using Application.Features.Maintenances.Commands.Start;
+using Application.Features.Maintenances.Commands.Update;
+using Application.Features.Maintenances.Queries.GetAll;
+using Application.Features.Maintenances.Queries.GetByEquipmentId;
+using Application.Features.Maintenances.Queries.GetById;
+using Application.Features.Maintenances.Queries.GetByLabId;
+using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -10,12 +20,10 @@ namespace API.Controllers
     [ApiController]
     public class MaintenancesController : ControllerBase
     {
-        private readonly IMaintenanceService _maintenanceService;
-
-        public MaintenancesController(
-            IMaintenanceService maintenanceService)
+        private readonly ISender _sender;
+        public MaintenancesController(ISender sender)
         {
-            _maintenanceService = maintenanceService;
+            _sender = sender;
         }
 
         [HttpGet]
@@ -23,8 +31,7 @@ namespace API.Controllers
         public async Task<IActionResult> GetAll(
             CancellationToken cancellationToken)
         {
-            var result = await _maintenanceService.GetAllAsync(
-                cancellationToken);
+            var result = await _sender.Send(new MaintenanceGetAllQuery(), cancellationToken);
 
             return Ok(result);
         }
@@ -36,9 +43,7 @@ namespace API.Controllers
             int id,
             CancellationToken cancellationToken)
         {
-            var result = await _maintenanceService.GetByIdAsync(
-                id,
-                cancellationToken);
+            var result = await _sender.Send(new MaintenanceGetByIdQuery(id), cancellationToken);
 
             if (result is null)
             {
@@ -54,9 +59,7 @@ namespace API.Controllers
             int labId,
             CancellationToken cancellationToken)
         {
-            var result = await _maintenanceService.GetByLabIdAsync(
-                labId,
-                cancellationToken);
+            var result = await _sender.Send(new MaintenanceGetByLabIdQuery(labId), cancellationToken);
 
             return Ok(result);
         }
@@ -66,9 +69,7 @@ namespace API.Controllers
             int equipmentId,
             CancellationToken cancellationToken)
         {
-            var result = await _maintenanceService.GetByEquipmentIdAsync(
-                equipmentId,
-                cancellationToken);
+            var result = await _sender.Send(new MaintenanceGetByEquipmentIdQuery(equipmentId), cancellationToken);
 
             return Ok(result);
         }
@@ -86,9 +87,7 @@ namespace API.Controllers
             [FromBody] CreateMaintenanceRequest request,
             CancellationToken cancellationToken)
         {
-            var result = await _maintenanceService.CreateAsync(
-                request,
-                cancellationToken);
+            var result = await _sender.Send(new MaintenanceCreateCommand(request), cancellationToken);
 
             return CreatedAtAction(
                 nameof(GetById),
@@ -107,10 +106,7 @@ namespace API.Controllers
             [FromBody] UpdateMaintenanceRequest request,
             CancellationToken cancellationToken)
         {
-            await _maintenanceService.UpdateAsync(
-                id,
-                request,
-                cancellationToken);
+            await _sender.Send(new MaintenanceUpdateCommand(id, request), cancellationToken);
 
             return NoContent();
         }
@@ -121,9 +117,7 @@ namespace API.Controllers
             int id,
             CancellationToken cancellationToken)
         {
-            await _maintenanceService.StartAsync(
-                id,
-                cancellationToken);
+            await _sender.Send(new MaintenanceStartCommand(id), cancellationToken);
 
             return NoContent();
         }
@@ -134,9 +128,7 @@ namespace API.Controllers
             int id,
             CancellationToken cancellationToken)
         {
-            await _maintenanceService.CompleteAsync(
-                id,
-                cancellationToken);
+            await _sender.Send(new MaintenanceCompleteCommand(id), cancellationToken);
 
             return NoContent();
         }
@@ -147,9 +139,7 @@ namespace API.Controllers
             int id,
             CancellationToken cancellationToken)
         {
-            await _maintenanceService.CancelAsync(
-                id,
-                cancellationToken);
+            await _sender.Send(new MaintenanceCancelCommand(id), cancellationToken);
 
             return NoContent();
         }
@@ -161,9 +151,7 @@ namespace API.Controllers
             int id,
             CancellationToken cancellationToken)
         {
-            await _maintenanceService.CancelSeriesAsync(
-                id,
-                cancellationToken);
+            await _sender.Send(new MaintenanceCancelSeriesCommand(id), cancellationToken);
 
             return NoContent();
         }

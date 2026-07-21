@@ -1,6 +1,14 @@
-﻿using Application.DTOs.PriorityRules;
-using Application.Interfaces;
+using Application.DTOs.PriorityRules;
 using Domain;
+using Application.Features.PriorityRules.Commands.Activate;
+using Application.Features.PriorityRules.Commands.Create;
+using Application.Features.PriorityRules.Commands.Deactivate;
+using Application.Features.PriorityRules.Commands.Update;
+using Application.Features.PriorityRules.Queries.GetActive;
+using Application.Features.PriorityRules.Queries.GetAll;
+using Application.Features.PriorityRules.Queries.GetById;
+using Application.Features.PriorityRules.Queries.GetByPurposeType;
+using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -11,25 +19,24 @@ namespace API.Controllers
     [ApiController]
     public class PriorityRulesController : ControllerBase
     {
-        private readonly IPriorityRuleService _priorityRuleService;
-
-        public PriorityRulesController(IPriorityRuleService priorityRuleService)
+        private readonly ISender _sender;
+        public PriorityRulesController(ISender sender)
         {
-            _priorityRuleService = priorityRuleService;
+            _sender = sender;
         }
 
         [HttpGet]
         public async Task<IActionResult> GetAll(CancellationToken cancellationToken) =>
-            Ok(await _priorityRuleService.GetAllAsync(cancellationToken));
+            Ok(await _sender.Send(new PriorityRuleGetAllQuery(), cancellationToken));
 
         [HttpGet("active")]
         public async Task<IActionResult> GetActive(CancellationToken cancellationToken) =>
-            Ok(await _priorityRuleService.GetActiveAsync(cancellationToken));
+            Ok(await _sender.Send(new PriorityRuleGetActiveQuery(), cancellationToken));
 
         [HttpGet("{id:int}")]
         public async Task<IActionResult> GetById(int id, CancellationToken cancellationToken)
         {
-            var result = await _priorityRuleService.GetByIdAsync(id, cancellationToken);
+            var result = await _sender.Send(new PriorityRuleGetByIdQuery(id), cancellationToken);
             return result is null
                 ? NotFound($"Không tìm thấy quy tắc ưu tiên có ID {id}.")
                 : Ok(result);
@@ -40,9 +47,7 @@ namespace API.Controllers
             BookingPurposeType purposeType,
             CancellationToken cancellationToken)
         {
-            var result = await _priorityRuleService.GetByPurposeTypeAsync(
-                purposeType,
-                cancellationToken);
+            var result = await _sender.Send(new PriorityRuleGetByPurposeTypeQuery(purposeType), cancellationToken);
             return result is null
                 ? NotFound($"Không tìm thấy quy tắc cho mục đích {purposeType}.")
                 : Ok(result);
@@ -54,7 +59,7 @@ namespace API.Controllers
             [FromBody] CreatePriorityRuleRequest request,
             CancellationToken cancellationToken)
         {
-            var result = await _priorityRuleService.CreateAsync(request, cancellationToken);
+            var result = await _sender.Send(new PriorityRuleCreateCommand(request), cancellationToken);
             return CreatedAtAction(nameof(GetById), new { id = result.PriorityRuleId }, result);
         }
 
@@ -65,7 +70,7 @@ namespace API.Controllers
             [FromBody] UpdatePriorityRuleRequest request,
             CancellationToken cancellationToken)
         {
-            await _priorityRuleService.UpdateAsync(id, request, cancellationToken);
+            await _sender.Send(new PriorityRuleUpdateCommand(id, request), cancellationToken);
             return NoContent();
         }
 
@@ -75,7 +80,7 @@ namespace API.Controllers
             int id,
             CancellationToken cancellationToken)
         {
-            await _priorityRuleService.ActivateAsync(id, cancellationToken);
+            await _sender.Send(new PriorityRuleActivateCommand(id), cancellationToken);
             return NoContent();
         }
 
@@ -85,7 +90,7 @@ namespace API.Controllers
             int id,
             CancellationToken cancellationToken)
         {
-            await _priorityRuleService.DeactivateAsync(id, cancellationToken);
+            await _sender.Send(new PriorityRuleDeactivateCommand(id), cancellationToken);
             return NoContent();
         }
     }

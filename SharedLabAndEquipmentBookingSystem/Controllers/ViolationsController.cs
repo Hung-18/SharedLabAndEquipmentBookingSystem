@@ -1,5 +1,14 @@
-﻿using Application.DTOs.Violations;
-using Application.Interfaces;
+using Application.DTOs.Violations;
+using Application.Features.Violations.Commands.Cancel;
+using Application.Features.Violations.Commands.Create;
+using Application.Features.Violations.Commands.Resolve;
+using Application.Features.Violations.Queries.GetActiveByUserId;
+using Application.Features.Violations.Queries.GetAll;
+using Application.Features.Violations.Queries.GetByBookingId;
+using Application.Features.Violations.Queries.GetById;
+using Application.Features.Violations.Queries.GetByUserId;
+using Application.Features.Violations.Queries.GetUserSummary;
+using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -10,11 +19,10 @@ namespace API.Controllers
     [ApiController]
     public class ViolationsController : ControllerBase
     {
-        private readonly IViolationService _violationService;
-
-        public ViolationsController(IViolationService violationService)
+        private readonly ISender _sender;
+        public ViolationsController(ISender sender)
         {
-            _violationService = violationService;
+            _sender = sender;
         }
 
         [Authorize(Roles = "Admin,LabManager")]
@@ -22,7 +30,7 @@ namespace API.Controllers
         public async Task<IActionResult> GetAll(
             CancellationToken cancellationToken)
         {
-            return Ok(await _violationService.GetAllAsync(cancellationToken));
+            return Ok(await _sender.Send(new ViolationGetAllQuery(), cancellationToken));
         }
 
         [HttpGet("{id:int}")]
@@ -30,9 +38,7 @@ namespace API.Controllers
             int id,
             CancellationToken cancellationToken)
         {
-            var result = await _violationService.GetByIdAsync(
-                id,
-                cancellationToken);
+            var result = await _sender.Send(new ViolationGetByIdQuery(id), cancellationToken);
 
             return result is null
                 ? NotFound($"Không tìm thấy vi phạm có ID {id}.")
@@ -44,9 +50,7 @@ namespace API.Controllers
             int userId,
             CancellationToken cancellationToken)
         {
-            return Ok(await _violationService.GetByUserIdAsync(
-                userId,
-                cancellationToken));
+            return Ok(await _sender.Send(new ViolationGetByUserIdQuery(userId), cancellationToken));
         }
 
         [HttpGet("user/{userId:int}/active")]
@@ -54,9 +58,7 @@ namespace API.Controllers
             int userId,
             CancellationToken cancellationToken)
         {
-            return Ok(await _violationService.GetActiveByUserIdAsync(
-                userId,
-                cancellationToken));
+            return Ok(await _sender.Send(new ViolationGetActiveByUserIdQuery(userId), cancellationToken));
         }
 
         [HttpGet("user/{userId:int}/summary")]
@@ -64,9 +66,7 @@ namespace API.Controllers
             int userId,
             CancellationToken cancellationToken)
         {
-            return Ok(await _violationService.GetUserSummaryAsync(
-                userId,
-                cancellationToken));
+            return Ok(await _sender.Send(new ViolationGetUserSummaryQuery(userId), cancellationToken));
         }
 
         [HttpGet("booking/{bookingId:int}")]
@@ -74,9 +74,7 @@ namespace API.Controllers
             int bookingId,
             CancellationToken cancellationToken)
         {
-            return Ok(await _violationService.GetByBookingIdAsync(
-                bookingId,
-                cancellationToken));
+            return Ok(await _sender.Send(new ViolationGetByBookingIdQuery(bookingId), cancellationToken));
         }
 
         [Authorize(Roles = "Admin,LabManager")]
@@ -85,9 +83,7 @@ namespace API.Controllers
             [FromBody] CreateViolationRequest request,
             CancellationToken cancellationToken)
         {
-            var result = await _violationService.CreateAsync(
-                request,
-                cancellationToken);
+            var result = await _sender.Send(new ViolationCreateCommand(request), cancellationToken);
 
             return CreatedAtAction(
                 nameof(GetById),
@@ -101,7 +97,7 @@ namespace API.Controllers
             int id,
             CancellationToken cancellationToken)
         {
-            await _violationService.ResolveAsync(id, cancellationToken);
+            await _sender.Send(new ViolationResolveCommand(id), cancellationToken);
             return NoContent();
         }
 
@@ -111,7 +107,7 @@ namespace API.Controllers
             int id,
             CancellationToken cancellationToken)
         {
-            await _violationService.CancelAsync(id, cancellationToken);
+            await _sender.Send(new ViolationCancelCommand(id), cancellationToken);
             return NoContent();
         }
     }
