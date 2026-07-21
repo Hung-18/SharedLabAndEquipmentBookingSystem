@@ -34,6 +34,9 @@ namespace Application.DI
             services.AddScoped<IRoleService, RoleService>();
             services.AddScoped<IDepartmentService, DepartmentService>();
             services.AddScoped<IReportService, ReportService>();
+            services.AddMediatR(cfg => {
+                cfg.RegisterServicesFromAssembly(typeof(DependencyInjection).Assembly);
+            });
 
             return services;
         }
