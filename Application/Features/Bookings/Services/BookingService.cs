@@ -4,6 +4,7 @@ using Application.Interfaces;
 using Domain;
 using Domain.Entities;
 using Domain.Interfaces;
+using AutoMapper;
 
 namespace Application.Services
 {
@@ -22,7 +23,10 @@ namespace Application.Services
         private readonly IWaitlistService _waitlistService;
         private readonly IViolationService _violationService;
 
+        private readonly IMapper _mapper;
+
         public BookingService(
+            IMapper mapper,
             IBookingRepository repository,
             IUnitOfWork unitOfWork,
             IAuditLogWriter auditLogWriter,
@@ -30,6 +34,7 @@ namespace Application.Services
             IWaitlistService waitlistService,
             IViolationService violationService)
         {
+            _mapper = mapper;
             _repository = repository;
             _unitOfWork = unitOfWork;
             _auditLogWriter = auditLogWriter;
@@ -47,7 +52,9 @@ namespace Application.Services
             var bookings = await _repository.GetAllDetailedAsync(cancellationToken);
             bookings = await FilterForManagerAsync(actor, bookings, cancellationToken);
 
-            return bookings.Select(MapResponse).ToList();
+            return bookings
+                .Select(booking => _mapper.Map<BookingResponse>(booking))
+                .ToList();
         }
 
         public async Task<BookingDetailResponse?> GetByIdAsync(
@@ -61,7 +68,7 @@ namespace Application.Services
                 return null;
 
             await EnsureCanReadBookingAsync(actor, booking, cancellationToken);
-            return MapDetailResponse(booking);
+            return _mapper.Map<BookingDetailResponse>(booking);
         }
 
         public async Task<List<BookingResponse>> GetByUserIdAsync(
@@ -84,7 +91,9 @@ namespace Application.Services
             var bookings = await _repository.GetByUserIdAsync(userId, cancellationToken);
             bookings = await FilterForManagerAsync(actor, bookings, cancellationToken);
 
-            return bookings.Select(MapResponse).ToList();
+            return bookings
+                .Select(booking => _mapper.Map<BookingResponse>(booking))
+                .ToList();
         }
 
         public async Task<List<BookingResponse>> GetPendingAsync(
@@ -96,7 +105,9 @@ namespace Application.Services
             var bookings = await _repository.GetPendingBookingsAsync(cancellationToken);
             bookings = await FilterForManagerAsync(actor, bookings, cancellationToken);
 
-            return bookings.Select(MapResponse).ToList();
+            return bookings
+                .Select(booking => _mapper.Map<BookingResponse>(booking))
+                .ToList();
         }
 
         public async Task<List<CalendarEventResponse>> GetCalendarAsync(
@@ -310,7 +321,7 @@ namespace Application.Services
                 ?? throw new InvalidOperationException(
                     "Không thể lấy thông tin booking vừa tạo.");
 
-            return MapDetailResponse(createdBooking);
+            return _mapper.Map<BookingDetailResponse>(createdBooking);
         }
 
         public async Task UpdateAsync(
@@ -1626,52 +1637,5 @@ namespace Application.Services
             };
         }
 
-        private static BookingResponse MapResponse(Booking booking)
-        {
-            return new BookingResponse
-            {
-                BookingId = booking.BookingId,
-                UserId = booking.UserId,
-                PriorityRuleId = booking.PriorityRuleId,
-                PriorityLevel = booking.PriorityRule?.PriorityLevel,
-                PurposeType = booking.PurposeType.ToString(),
-                StartTime = booking.StartTime,
-                EndTime = booking.EndTime,
-                Status = booking.Status.ToString(),
-                CreatedAt = booking.CreatedAt
-            };
-        }
-
-        private static BookingDetailResponse MapDetailResponse(Booking booking)
-        {
-            return new BookingDetailResponse
-            {
-                BookingId = booking.BookingId,
-                UserId = booking.UserId,
-                UserName = booking.User?.FullName,
-                PriorityRuleId = booking.PriorityRuleId,
-                PriorityLevel = booking.PriorityRule?.PriorityLevel,
-                ApprovedById = booking.ApprovedById,
-                ApprovedByName = booking.ApprovedBy?.FullName,
-                PurposeType = booking.PurposeType.ToString(),
-                PurposeDescription = booking.PurposeDescription,
-                StartTime = booking.StartTime,
-                EndTime = booking.EndTime,
-                Status = booking.Status.ToString(),
-                RejectionReason = booking.RejectionReason,
-                ApprovedAt = booking.ApprovedAt,
-                CreatedAt = booking.CreatedAt,
-                Items = booking.BookingItems.Select(item => new BookingItemResponse
-                {
-                    BookingItemId = item.BookingItemId,
-                    ResourceType = item.ResourceType.ToString(),
-                    LabId = item.LabId,
-                    LabName = item.LabRoom?.LabName,
-                    EquipmentId = item.EquipmentId,
-                    EquipmentName = item.Equipment?.EquipmentName,
-                    Note = item.Note
-                }).ToList()
-            };
-        }
     }
 }

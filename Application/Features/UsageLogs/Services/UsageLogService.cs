@@ -3,6 +3,7 @@ using Application.Interfaces;
 using Domain;
 using Domain.Entities;
 using Domain.Interfaces;
+using AutoMapper;
 
 namespace Application.Services
 {
@@ -24,7 +25,10 @@ namespace Application.Services
         private readonly IViolationService _violationService;
         private readonly IWaitlistService _waitlistService;
 
+        private readonly IMapper _mapper;
+
         public UsageLogService(
+            IMapper mapper,
             IUsageLogRepository repository,
             IUnitOfWork unitOfWork,
             IAuditLogWriter auditLogWriter,
@@ -32,6 +36,7 @@ namespace Application.Services
             IViolationService violationService,
             IWaitlistService waitlistService)
         {
+            _mapper = mapper;
             _repository = repository;
             _unitOfWork = unitOfWork;
             _auditLogWriter = auditLogWriter;
@@ -53,7 +58,7 @@ namespace Application.Services
                         cancellationToken)
                     : await _repository.GetAllAsync(cancellationToken);
 
-            return logs.Select(MapResponse).ToList();
+            return _mapper.Map<List<UsageLogResponse>>(logs);
         }
 
         public async Task<UsageLogResponse?> GetByIdAsync(
@@ -69,7 +74,7 @@ namespace Application.Services
             var booking = await GetBookingForLogAsync(log, cancellationToken);
             await EnsureCanAccessBookingAsync(actor, booking, cancellationToken);
 
-            return MapResponse(log);
+            return _mapper.Map<UsageLogResponse>(log);
         }
 
         public async Task<List<UsageLogResponse>> GetByBookingItemIdAsync(
@@ -95,7 +100,7 @@ namespace Application.Services
                 bookingItemId,
                 cancellationToken);
 
-            return logs.Select(MapResponse).ToList();
+            return _mapper.Map<List<UsageLogResponse>>(logs);
         }
 
         public async Task<List<UsageLogResponse>> GetByBookingIdAsync(
@@ -115,7 +120,7 @@ namespace Application.Services
                 bookingId,
                 cancellationToken);
 
-            return logs.Select(MapResponse).ToList();
+            return _mapper.Map<List<UsageLogResponse>>(logs);
         }
 
         public async Task<List<UsageLogResponse>> GetIncidentLogsAsync(
@@ -144,7 +149,7 @@ namespace Application.Services
                         to,
                         cancellationToken);
 
-            return logs.Select(MapResponse).ToList();
+            return _mapper.Map<List<UsageLogResponse>>(logs);
         }
 
         public async Task<UsageLogResponse> CheckInAsync(
@@ -235,7 +240,7 @@ namespace Application.Services
                 },
                 cancellationToken);
 
-            return MapResponse(createdLog!);
+            return _mapper.Map<UsageLogResponse>(createdLog!);
         }
 
         public async Task<UsageLogResponse> CheckOutAsync(
@@ -381,7 +386,7 @@ namespace Application.Services
                 },
                 cancellationToken);
 
-            return MapResponse(updatedLog!);
+            return _mapper.Map<UsageLogResponse>(updatedLog!);
         }
 
         public async Task<UsageLogResponse> ReportIncidentAsync(
@@ -510,7 +515,7 @@ namespace Application.Services
                 },
                 cancellationToken);
 
-            return MapResponse(updatedLog!);
+            return _mapper.Map<UsageLogResponse>(updatedLog!);
         }
 
         public Task<UsageLogResponse> ConfirmIncidentAsync(
@@ -620,7 +625,7 @@ namespace Application.Services
                 },
                 cancellationToken);
 
-            return MapResponse(updatedLog!);
+            return _mapper.Map<UsageLogResponse>(updatedLog!);
         }
 
         private async Task MarkResourceInUseAsync(
@@ -860,23 +865,5 @@ namespace Application.Services
                 });
         }
 
-        private static UsageLogResponse MapResponse(UsageLog usageLog)
-        {
-            return new UsageLogResponse
-            {
-                LogId = usageLog.LogId,
-                BookingItemId = usageLog.BookingItemId,
-                ActualCheckin = usageLog.ActualCheckin,
-                ActualCheckout = usageLog.ActualCheckout,
-                IncidentStatus = usageLog.IncidentStatus.ToString(),
-                IncidentDescription = usageLog.IncidentDescription,
-                AffectedEquipmentId = usageLog.AffectedEquipmentId,
-                IncidentReviewStatus =
-                    usageLog.IncidentReviewStatus.ToString(),
-                IncidentReviewedById = usageLog.IncidentReviewedById,
-                IncidentReviewedAt = usageLog.IncidentReviewedAt,
-                IncidentReviewNote = usageLog.IncidentReviewNote
-            };
-        }
     }
 }

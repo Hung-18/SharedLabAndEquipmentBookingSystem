@@ -3,6 +3,7 @@ using Application.Interfaces;
 using Domain;
 using Domain.Entities;
 using Domain.Interfaces;
+using AutoMapper;
 
 namespace Application.Services
 {
@@ -13,12 +14,16 @@ namespace Application.Services
         private readonly IAuditLogWriter _auditLogWriter;
         private readonly ICurrentUserService _currentUserService;
 
+        private readonly IMapper _mapper;
+
         public PriorityRuleService(
+            IMapper mapper,
             IPriorityRuleRepository repository,
             IUnitOfWork unitOfWork,
             IAuditLogWriter auditLogWriter,
             ICurrentUserService currentUserService)
         {
+            _mapper = mapper;
             _repository = repository;
             _unitOfWork = unitOfWork;
             _auditLogWriter = auditLogWriter;
@@ -32,7 +37,7 @@ namespace Application.Services
             var rules = await _repository.GetAllAsync(cancellationToken);
             return rules.OrderBy(x => x.PriorityLevel)
                 .ThenBy(x => x.PurposeType)
-                .Select(MapResponse)
+                .Select(rule => _mapper.Map<PriorityRuleResponse>(rule))
                 .ToList();
         }
 
@@ -41,7 +46,7 @@ namespace Application.Services
         {
             await GetAuthenticatedUserAsync(cancellationToken);
             return (await _repository.GetActiveRulesAsync(cancellationToken))
-                .Select(MapResponse)
+                .Select(rule => _mapper.Map<PriorityRuleResponse>(rule))
                 .ToList();
         }
 
@@ -51,7 +56,9 @@ namespace Application.Services
         {
             await GetAuthenticatedUserAsync(cancellationToken);
             var rule = await _repository.GetByIdAsync(id, cancellationToken);
-            return rule is null ? null : MapResponse(rule);
+            return rule is null
+                ? null
+                : _mapper.Map<PriorityRuleResponse>(rule);
         }
 
         public async Task<PriorityRuleResponse?> GetByPurposeTypeAsync(
@@ -63,7 +70,9 @@ namespace Application.Services
             var rule = await _repository.GetByPurposeTypeAsync(
                 purposeType,
                 cancellationToken);
-            return rule is null ? null : MapResponse(rule);
+            return rule is null
+                ? null
+                : _mapper.Map<PriorityRuleResponse>(rule);
         }
 
         public async Task<PriorityRuleResponse> CreateAsync(
@@ -94,7 +103,7 @@ namespace Application.Services
                 await _unitOfWork.SaveChangesAsync(ct);
             }, cancellationToken);
 
-            return MapResponse(rule);
+            return _mapper.Map<PriorityRuleResponse>(rule);
         }
 
         public async Task UpdateAsync(
@@ -223,16 +232,5 @@ namespace Application.Services
                 throw new ArgumentException("PurposeType không hợp lệ.");
         }
 
-        private static PriorityRuleResponse MapResponse(PriorityRule rule)
-        {
-            return new PriorityRuleResponse
-            {
-                PriorityRuleId = rule.PriorityRuleId,
-                PurposeType = rule.PurposeType.ToString(),
-                PriorityLevel = rule.PriorityLevel,
-                Description = rule.Description,
-                Status = rule.Status.ToString()
-            };
-        }
     }
 }

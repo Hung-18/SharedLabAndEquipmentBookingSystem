@@ -3,6 +3,7 @@ using Application.Interfaces;
 using Domain;
 using Domain.Entities;
 using Domain.Interfaces;
+using AutoMapper;
 
 namespace Application.Services
 {
@@ -14,12 +15,16 @@ namespace Application.Services
         private readonly IAuditLogWriter _auditLogWriter;
         private readonly ICurrentUserService _currentUserService;
 
+        private readonly IMapper _mapper;
+
         public LabRoomService(
+            IMapper mapper,
             ILabRoomRepository repository,
             IUnitOfWork unitOfWork,
             IAuditLogWriter auditLogWriter,
             ICurrentUserService currentUserService)
         {
+            _mapper = mapper;
             _repository = repository;
             _unitOfWork = unitOfWork;
             _auditLogWriter = auditLogWriter;
@@ -51,7 +56,7 @@ namespace Application.Services
 
             return new PagedLabRoomResponse
             {
-                Items = items.Select(MapResponse).ToList(),
+                Items = _mapper.Map<List<LabRoomResponse>>(items),
                 PageNumber = request.PageNumber,
                 PageSize = request.PageSize,
                 TotalCount = total,
@@ -64,7 +69,7 @@ namespace Application.Services
         {
             await GetAuthenticatedUserAsync(cancellationToken);
             return (await _repository.GetAllAsync(cancellationToken))
-                .Select(MapResponse)
+                .Select(room => _mapper.Map<LabRoomResponse>(room))
                 .ToList();
         }
 
@@ -74,7 +79,9 @@ namespace Application.Services
         {
             await GetAuthenticatedUserAsync(cancellationToken);
             var room = await _repository.GetDetailAsync(id, cancellationToken);
-            return room is null ? null : MapDetailResponse(room);
+            return room is null
+                ? null
+                : _mapper.Map<LabRoomDetailResponse>(room);
         }
 
         public async Task<LabRoomDetailResponse> CreateAsync(
@@ -113,9 +120,14 @@ namespace Application.Services
                 await _unitOfWork.SaveChangesAsync(ct);
             }, cancellationToken);
 
-            return MapDetailResponse(
-                await _repository.GetDetailAsync(room.LabId, cancellationToken)
-                ?? throw new InvalidOperationException("Không thể đọc lại phòng vừa tạo."));
+            var createdRoom =
+                await _repository.GetDetailAsync(
+                    room.LabId,
+                    cancellationToken)
+                ?? throw new InvalidOperationException(
+                    "Không thể đọc lại phòng vừa tạo.");
+
+            return _mapper.Map<LabRoomDetailResponse>(createdRoom);
         }
 
         public async Task UpdateAsync(
@@ -257,28 +269,5 @@ namespace Application.Services
             Status = room.Status.ToString()
         };
 
-        private static LabRoomResponse MapResponse(LabRoom room) => new()
-        {
-            LabId = room.LabId,
-            LabName = room.LabName,
-            RoomCode = room.RoomCode,
-            Location = room.Location,
-            Capacity = room.Capacity,
-            Status = room.Status.ToString()
-        };
-
-        private static LabRoomDetailResponse MapDetailResponse(LabRoom room) => new()
-        {
-            LabId = room.LabId,
-            LabName = room.LabName,
-            RoomCode = room.RoomCode,
-            Location = room.Location,
-            Capacity = room.Capacity,
-            Description = room.Description,
-            ImageUrl = room.ImageUrl,
-            UsageGuideline = room.UsageGuideline,
-            Status = room.Status.ToString(),
-            ManagerName = room.Manager?.FullName
-        };
     }
 }

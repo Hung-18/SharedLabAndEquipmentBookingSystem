@@ -3,6 +3,7 @@ using Application.Interfaces;
 using Domain;
 using Domain.Entities;
 using Domain.Interfaces;
+using AutoMapper;
 
 namespace Application.Services
 {
@@ -12,11 +13,15 @@ namespace Application.Services
         private readonly IUnitOfWork _unitOfWork;
         private readonly ICurrentUserService _currentUserService;
 
+        private readonly IMapper _mapper;
+
         public WaitlistService(
+            IMapper mapper,
             IWaitlistRepository repository,
             IUnitOfWork unitOfWork,
             ICurrentUserService currentUserService)
         {
+            _mapper = mapper;
             _repository = repository;
             _unitOfWork = unitOfWork;
             _currentUserService = currentUserService;
@@ -35,7 +40,7 @@ namespace Application.Services
                         cancellationToken)
                     : await _repository.GetAllAsync(cancellationToken);
 
-            return waitlists.Select(MapResponse).ToList();
+            return _mapper.Map<List<WaitlistResponse>>(waitlists);
         }
 
         public async Task<WaitlistResponse?> GetByIdAsync(
@@ -60,7 +65,7 @@ namespace Application.Services
             if (!canRead)
                 throw new UnauthorizedAccessException("Bạn không có quyền xem hàng đợi này.");
 
-            return MapResponse(waitlist);
+            return _mapper.Map<WaitlistResponse>(waitlist);
         }
 
         public async Task<List<WaitlistResponse>> GetByUserIdAsync(
@@ -76,7 +81,7 @@ namespace Application.Services
                 ?? throw new KeyNotFoundException($"Không tìm thấy người dùng có ID {userId}.");
 
             var waitlists = await _repository.GetByUserIdAsync(user.UserId, cancellationToken);
-            return waitlists.Select(MapResponse).ToList();
+            return _mapper.Map<List<WaitlistResponse>>(waitlists);
         }
 
         public async Task<List<WaitlistResponse>> GetQueueAsync(
@@ -105,7 +110,7 @@ namespace Application.Services
                 requestedEnd,
                 cancellationToken);
 
-            return waitlists.Select(MapResponse).ToList();
+            return _mapper.Map<List<WaitlistResponse>>(waitlists);
         }
 
         public async Task<WaitlistResponse> CreateAsync(
@@ -181,7 +186,7 @@ namespace Application.Services
                 },
                 cancellationToken);
 
-            return MapResponse(waitlist!);
+            return _mapper.Map<WaitlistResponse>(waitlist!);
         }
 
         public async Task<WaitlistResponse> NotifyNextAsync(
@@ -226,7 +231,7 @@ namespace Application.Services
                 },
                 cancellationToken);
 
-            return MapResponse(next!);
+            return _mapper.Map<WaitlistResponse>(next!);
         }
 
         public async Task MarkBookedAsync(
@@ -731,20 +736,5 @@ namespace Application.Services
                 throw new ArgumentException("Thời gian bắt đầu phải ở tương lai.");
         }
 
-        private static WaitlistResponse MapResponse(Waitlist waitlist)
-        {
-            return new WaitlistResponse
-            {
-                WaitlistId = waitlist.WaitlistId,
-                UserId = waitlist.UserId,
-                LabId = waitlist.LabId,
-                EquipmentId = waitlist.EquipmentId,
-                RequestedStart = waitlist.RequestedStart,
-                RequestedEnd = waitlist.RequestedEnd,
-                QueuePosition = waitlist.QueuePosition,
-                NotifiedAt = waitlist.NotifiedAt,
-                Status = waitlist.Status.ToString()
-            };
-        }
     }
 }

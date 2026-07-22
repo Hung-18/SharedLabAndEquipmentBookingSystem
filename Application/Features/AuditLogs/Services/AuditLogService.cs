@@ -3,6 +3,7 @@ using Application.Interfaces;
 using Domain;
 using Domain.Entities;
 using Domain.Interfaces;
+using AutoMapper;
 
 namespace Application.Services
 {
@@ -15,11 +16,15 @@ namespace Application.Services
         private readonly IUnitOfWork _unitOfWork;
         private readonly ICurrentUserService _currentUserService;
 
+        private readonly IMapper _mapper;
+
         public AuditLogService(
+            IMapper mapper,
             IAuditLogRepository repository,
             IUnitOfWork unitOfWork,
             ICurrentUserService currentUserService)
         {
+            _mapper = mapper;
             _repository = repository;
             _unitOfWork = unitOfWork;
             _currentUserService = currentUserService;
@@ -57,7 +62,7 @@ namespace Application.Services
                 TotalPages = result.TotalCount == 0
                     ? 0
                     : (int)Math.Ceiling(result.TotalCount / (double)pageSize),
-                Items = result.Items.Select(MapResponse).ToList()
+                Items = _mapper.Map<List<AuditLogResponse>>(result.Items)
             };
         }
 
@@ -70,7 +75,9 @@ namespace Application.Services
 
             await ValidateCurrentAdminAsync(cancellationToken);
             var auditLog = await _repository.GetByIdAsync(id, cancellationToken);
-            return auditLog is null ? null : MapResponse(auditLog);
+            return auditLog is null
+                ? null
+                : _mapper.Map<AuditLogResponse>(auditLog);
         }
 
         private async Task ValidateCurrentAdminAsync(
@@ -110,21 +117,5 @@ namespace Application.Services
                     "EntityName không được vượt quá 100 ký tự.");
         }
 
-        private static AuditLogResponse MapResponse(AuditLog auditLog)
-        {
-            return new AuditLogResponse
-            {
-                AuditLogId = auditLog.AuditLogId,
-                UserId = auditLog.UserId,
-                UserName = auditLog.User?.FullName,
-                ActionType = auditLog.ActionType.ToString(),
-                EntityName = auditLog.EntityName,
-                EntityId = auditLog.EntityId,
-                OldValue = auditLog.OldValue,
-                NewValue = auditLog.NewValue,
-                IpAddress = auditLog.IpAddress,
-                CreatedAt = auditLog.CreatedAt
-            };
-        }
     }
 }

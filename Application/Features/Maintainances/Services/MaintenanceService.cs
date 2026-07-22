@@ -3,6 +3,7 @@ using Application.Interfaces;
 using Domain;
 using Domain.Entities;
 using Domain.Interfaces;
+using AutoMapper;
 
 namespace Application.Services
 {
@@ -13,12 +14,16 @@ namespace Application.Services
         private readonly IAuditLogWriter _auditLogWriter;
         private readonly ICurrentUserService _currentUserService;
 
+        private readonly IMapper _mapper;
+
         public MaintenanceService(
+            IMapper mapper,
             IMaintenanceRepository repository,
             IUnitOfWork unitOfWork,
             IAuditLogWriter auditLogWriter,
             ICurrentUserService currentUserService)
         {
+            _mapper = mapper;
             _repository = repository;
             _unitOfWork = unitOfWork;
             _auditLogWriter = auditLogWriter;
@@ -36,7 +41,9 @@ namespace Application.Services
                         cancellationToken)
                     : await _repository.GetAllAsync(cancellationToken);
 
-            return maintenances.Select(MapResponse).ToList();
+            return maintenances
+                .Select(maintenance => _mapper.Map<MaintenanceResponse>(maintenance))
+                .ToList();
         }
 
         public async Task<MaintenanceDetailResponse?> GetByIdAsync(
@@ -60,7 +67,7 @@ namespace Application.Services
                     "LabManager chỉ được xem lịch bảo trì của phòng mình quản lý.");
             }
 
-            return MapDetailResponse(maintenance);
+            return _mapper.Map<MaintenanceDetailResponse>(maintenance);
         }
 
         public async Task<List<MaintenanceResponse>> GetByLabIdAsync(
@@ -77,7 +84,9 @@ namespace Application.Services
                 null,
                 cancellationToken);
 
-            return maintenances.Select(MapResponse).ToList();
+            return maintenances
+                .Select(maintenance => _mapper.Map<MaintenanceResponse>(maintenance))
+                .ToList();
         }
 
         public async Task<List<MaintenanceResponse>> GetByEquipmentIdAsync(
@@ -97,7 +106,9 @@ namespace Application.Services
                 equipment.EquipmentId,
                 cancellationToken);
 
-            return maintenances.Select(MapResponse).ToList();
+            return maintenances
+                .Select(maintenance => _mapper.Map<MaintenanceResponse>(maintenance))
+                .ToList();
         }
 
         public async Task<MaintenanceDetailResponse> CreateAsync(
@@ -164,7 +175,7 @@ namespace Application.Services
                 ?? throw new InvalidOperationException(
                     "Không thể lấy thông tin lịch bảo trì vừa tạo.");
 
-            return MapDetailResponse(created);
+            return _mapper.Map<MaintenanceDetailResponse>(created);
         }
 
         public async Task UpdateAsync(
@@ -814,43 +825,5 @@ namespace Application.Services
             };
         }
 
-        private static MaintenanceResponse MapResponse(Maintenance maintenance)
-        {
-            return new MaintenanceResponse
-            {
-                MaintenanceId = maintenance.MaintenanceId,
-                LabId = maintenance.LabId,
-                EquipmentId = maintenance.EquipmentId,
-                StartTime = maintenance.StartTime,
-                EndTime = maintenance.EndTime,
-                Status = maintenance.Status.ToString(),
-                RecurrenceType = maintenance.RecurrenceType.ToString(),
-                RecurrenceInterval = maintenance.RecurrenceInterval,
-                RecurrenceEndDate = maintenance.RecurrenceEndDate,
-                ParentMaintenanceId = maintenance.ParentMaintenanceId,
-                RecurrenceStopped = maintenance.RecurrenceStopped
-            };
-        }
-
-        private static MaintenanceDetailResponse MapDetailResponse(Maintenance maintenance)
-        {
-            return new MaintenanceDetailResponse
-            {
-                MaintenanceId = maintenance.MaintenanceId,
-                LabId = maintenance.LabId,
-                EquipmentId = maintenance.EquipmentId,
-                CreatedById = maintenance.CreatedById,
-                StartTime = maintenance.StartTime,
-                EndTime = maintenance.EndTime,
-                MaintenanceCost = maintenance.MaintenanceCost,
-                Notes = maintenance.Notes,
-                Status = maintenance.Status.ToString(),
-                RecurrenceType = maintenance.RecurrenceType.ToString(),
-                RecurrenceInterval = maintenance.RecurrenceInterval,
-                RecurrenceEndDate = maintenance.RecurrenceEndDate,
-                ParentMaintenanceId = maintenance.ParentMaintenanceId,
-                RecurrenceStopped = maintenance.RecurrenceStopped
-            };
-        }
     }
 }

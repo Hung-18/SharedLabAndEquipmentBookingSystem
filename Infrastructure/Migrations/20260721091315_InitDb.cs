@@ -344,7 +344,7 @@ namespace Infrastructure.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_BookingItems", x => x.BookingItemId);
-                    table.CheckConstraint("CK_BookingItems_OneResourceOnly", "\r\n(\r\n    ([ResourceType] IN ('LabRoom', 'Lab') AND [LabId] IS NOT NULL AND [EquipmentId] IS NULL)\r\n    OR\r\n    ([ResourceType] = 'Equipment' AND [LabId] IS NULL AND [EquipmentId] IS NOT NULL)\r\n)");
+                    table.CheckConstraint("CK_BookingItems_OneResourceOnly", "\n(\n    ([ResourceType] IN ('LabRoom', 'Lab') AND [LabId] IS NOT NULL AND [EquipmentId] IS NULL)\n    OR\n    ([ResourceType] = 'Equipment' AND [LabId] IS NULL AND [EquipmentId] IS NOT NULL)\n)");
                     table.CheckConstraint("CK_BookingItems_ResourceType", "[ResourceType] IN ('LabRoom', 'Equipment')");
                     table.ForeignKey(
                         name: "FK_BookingItems_Bookings_BookingId",
@@ -392,7 +392,7 @@ namespace Infrastructure.Migrations
                 {
                     table.PrimaryKey("PK_Maintenances", x => x.MaintenanceId);
                     table.CheckConstraint("CK_Maintenances_MaintenanceCost", "[MaintenanceCost] >= 0");
-                    table.CheckConstraint("CK_Maintenances_OneResourceOnly", "\r\n(\r\n    ([LabId] IS NOT NULL AND [EquipmentId] IS NULL)\r\n    OR\r\n    ([LabId] IS NULL AND [EquipmentId] IS NOT NULL)\r\n)");
+                    table.CheckConstraint("CK_Maintenances_OneResourceOnly", "\n(\n    ([LabId] IS NOT NULL AND [EquipmentId] IS NULL)\n    OR\n    ([LabId] IS NULL AND [EquipmentId] IS NOT NULL)\n)");
                     table.CheckConstraint("CK_Maintenances_StartTime_EndTime", "[StartTime] < [EndTime]");
                     table.CheckConstraint("CK_Maintenances_Status", "[Status] IN ('Scheduled', 'InProgress', 'Completed', 'Cancelled')");
                     table.ForeignKey(
@@ -433,7 +433,7 @@ namespace Infrastructure.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_Waitlists", x => x.WaitlistId);
-                    table.CheckConstraint("CK_Waitlists_OneResourceOnly", "\r\n(\r\n    ([LabId] IS NOT NULL AND [EquipmentId] IS NULL)\r\n    OR\r\n    ([LabId] IS NULL AND [EquipmentId] IS NOT NULL)\r\n)");
+                    table.CheckConstraint("CK_Waitlists_OneResourceOnly", "\n(\n    ([LabId] IS NOT NULL AND [EquipmentId] IS NULL)\n    OR\n    ([LabId] IS NULL AND [EquipmentId] IS NOT NULL)\n)");
                     table.CheckConstraint("CK_Waitlists_QueuePosition", "[QueuePosition] > 0");
                     table.CheckConstraint("CK_Waitlists_RequestedStart_RequestedEnd", "[RequestedStart] < [RequestedEnd]");
                     table.CheckConstraint("CK_Waitlists_Status", "[Status] IN ('Waiting', 'Notified', 'Booked', 'Cancelled', 'Expired')");

@@ -3,6 +3,7 @@ using Application.Interfaces;
 using Domain;
 using Domain.Entities;
 using Domain.Interfaces;
+using AutoMapper;
 
 namespace Application.Services
 {
@@ -14,13 +15,17 @@ namespace Application.Services
         private readonly ICurrentUserService _currentUserService;
         private readonly IAuditLogWriter _auditLogWriter;
 
+        private readonly IMapper _mapper;
+
         public DepartmentService(
+            IMapper mapper,
             IDepartmentRepository repository,
             IUserRepository userRepository,
             IUnitOfWork unitOfWork,
             ICurrentUserService currentUserService,
             IAuditLogWriter auditLogWriter)
         {
+            _mapper = mapper;
             _repository = repository;
             _userRepository = userRepository;
             _unitOfWork = unitOfWork;
@@ -40,7 +45,7 @@ namespace Application.Services
                 ? await _repository.GetActiveDepartmentsAsync(cancellationToken)
                 : await _repository.GetAllOrderedAsync(cancellationToken);
 
-            return departments.Select(Map).ToList();
+            return _mapper.Map<List<DepartmentResponse>>(departments);
         }
 
         public async Task<DepartmentResponse?> GetByIdAsync(
@@ -61,7 +66,7 @@ namespace Application.Services
                 return null;
             }
 
-            return Map(department);
+            return _mapper.Map<DepartmentResponse>(department);
         }
 
         public async Task<DepartmentResponse> CreateAsync(
@@ -102,7 +107,7 @@ namespace Application.Services
                 },
                 cancellationToken);
 
-            return Map(department);
+            return _mapper.Map<DepartmentResponse>(department);
         }
 
         public async Task<DepartmentResponse> UpdateAsync(
@@ -128,7 +133,7 @@ namespace Application.Services
             _repository.Update(department);
 
             await SaveWithAuditAsync(actor.UserId, department, oldValue, cancellationToken);
-            return Map(department);
+            return _mapper.Map<DepartmentResponse>(department);
         }
 
         public async Task DeactivateAsync(
@@ -167,7 +172,7 @@ namespace Application.Services
             _repository.Update(department);
 
             await SaveWithAuditAsync(actor.UserId, department, oldValue, cancellationToken);
-            return Map(department);
+            return _mapper.Map<DepartmentResponse>(department);
         }
 
         private async Task<User> EnsureAuthenticatedActiveAsync(
@@ -242,15 +247,5 @@ namespace Application.Services
             };
         }
 
-        private static DepartmentResponse Map(Department department)
-        {
-            return new DepartmentResponse
-            {
-                DepartmentId = department.DepartmentId,
-                DepartmentName = department.DepartmentName,
-                Description = department.Description,
-                Status = department.Status
-            };
-        }
     }
 }
