@@ -22,8 +22,11 @@ namespace Infrastructure.Configurations
 
             entity.HasKey(x => x.RefreshTokenId);
 
-            entity.Property(x => x.Token)
-                .HasMaxLength(500)
+            // Keep the existing database column name to avoid a schema
+            // migration while changing the stored value from raw token to hash.
+            entity.Property(x => x.TokenHash)
+                .HasColumnName("Token")
+                .HasMaxLength(64)
                 .IsRequired();
 
             entity.Property(x => x.ExpiresAt)
@@ -37,7 +40,8 @@ namespace Infrastructure.Configurations
                 .HasMaxLength(30)
                 .IsRequired();
 
-            entity.HasIndex(x => x.Token)
+            entity.HasIndex(x => x.TokenHash)
+                .HasDatabaseName("IX_RefreshTokens_Token")
                 .IsUnique();
 
             entity.HasOne(x => x.User)

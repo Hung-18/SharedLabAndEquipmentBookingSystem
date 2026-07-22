@@ -279,7 +279,7 @@ namespace Application.Mappings
 
         private void ConfigureViolationMappings()
         {
-            CreateMap<global::Violation, ViolationResponse>()
+            CreateMap<Domain.Entities.Violation, ViolationResponse>()
                 .ForMember(
                     destination => destination.ViolationType,
                     option => option.MapFrom(

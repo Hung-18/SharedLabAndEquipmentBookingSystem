@@ -611,18 +611,20 @@ namespace Infrastructure.Migrations
                         .HasMaxLength(30)
                         .HasColumnType("nvarchar(30)");
 
-                    b.Property<string>("Token")
+                    b.Property<string>("TokenHash")
                         .IsRequired()
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)")
+                        .HasColumnName("Token");
 
                     b.Property<int>("UserId")
                         .HasColumnType("int");
 
                     b.HasKey("RefreshTokenId");
 
-                    b.HasIndex("Token")
-                        .IsUnique();
+                    b.HasIndex("TokenHash")
+                        .IsUnique()
+                        .HasDatabaseName("IX_RefreshTokens_Token");
 
                     b.HasIndex("UserId");
 
@@ -811,6 +813,55 @@ namespace Infrastructure.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Domain.Entities.Violation", b =>
+                {
+                    b.Property<int>("ViolationId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("ViolationId"));
+
+                    b.Property<int>("BookingId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("LoggedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("PenaltyPointsAdded")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ViolationType")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.HasKey("ViolationId");
+
+                    b.HasIndex("BookingId");
+
+                    b.HasIndex("UserId", "BookingId", "ViolationType")
+                        .IsUnique()
+                        .HasDatabaseName("UX_Violations_OneActivePerBookingType")
+                        .HasFilter("[Status] = 'Active'");
+
+                    b.ToTable("Violations", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_Violations_PenaltyPointsAdded", "[PenaltyPointsAdded] > 0");
+
+                            t.HasCheckConstraint("CK_Violations_Status", "[Status] IN ('Active', 'Resolved', 'Cancelled')");
+
+                            t.HasCheckConstraint("CK_Violations_ViolationType", "[ViolationType] IN ('NoShow', 'LateCheckout', 'DamageEquipment', 'MisuseEquipment', 'UnauthorizedUse')");
+                        });
+                });
+
             modelBuilder.Entity("Domain.Entities.Waitlist", b =>
                 {
                     b.Property<int>("WaitlistId")
@@ -862,55 +913,6 @@ namespace Infrastructure.Migrations
                             t.HasCheckConstraint("CK_Waitlists_RequestedStart_RequestedEnd", "[RequestedStart] < [RequestedEnd]");
 
                             t.HasCheckConstraint("CK_Waitlists_Status", "[Status] IN ('Waiting', 'Notified', 'Booked', 'Cancelled', 'Expired')");
-                        });
-                });
-
-            modelBuilder.Entity("Violation", b =>
-                {
-                    b.Property<int>("ViolationId")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("ViolationId"));
-
-                    b.Property<int>("BookingId")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime>("LoggedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<int>("PenaltyPointsAdded")
-                        .HasColumnType("int");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(30)
-                        .HasColumnType("nvarchar(30)");
-
-                    b.Property<int>("UserId")
-                        .HasColumnType("int");
-
-                    b.Property<string>("ViolationType")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.HasKey("ViolationId");
-
-                    b.HasIndex("BookingId");
-
-                    b.HasIndex("UserId", "BookingId", "ViolationType")
-                        .IsUnique()
-                        .HasDatabaseName("UX_Violations_OneActivePerBookingType")
-                        .HasFilter("[Status] = 'Active'");
-
-                    b.ToTable("Violations", null, t =>
-                        {
-                            t.HasCheckConstraint("CK_Violations_PenaltyPointsAdded", "[PenaltyPointsAdded] > 0");
-
-                            t.HasCheckConstraint("CK_Violations_Status", "[Status] IN ('Active', 'Resolved', 'Cancelled')");
-
-                            t.HasCheckConstraint("CK_Violations_ViolationType", "[ViolationType] IN ('NoShow', 'LateCheckout', 'DamageEquipment', 'MisuseEquipment', 'UnauthorizedUse')");
                         });
                 });
 
@@ -1099,6 +1101,25 @@ namespace Infrastructure.Migrations
                     b.Navigation("Role");
                 });
 
+            modelBuilder.Entity("Domain.Entities.Violation", b =>
+                {
+                    b.HasOne("Domain.Entities.Booking", "Booking")
+                        .WithMany("Violations")
+                        .HasForeignKey("BookingId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Domain.Entities.User", "User")
+                        .WithMany("Violations")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Booking");
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("Domain.Entities.Waitlist", b =>
                 {
                     b.HasOne("Domain.Entities.Equipment", "Equipment")
@@ -1120,25 +1141,6 @@ namespace Infrastructure.Migrations
                     b.Navigation("Equipment");
 
                     b.Navigation("LabRoom");
-
-                    b.Navigation("User");
-                });
-
-            modelBuilder.Entity("Violation", b =>
-                {
-                    b.HasOne("Domain.Entities.Booking", "Booking")
-                        .WithMany("Violations")
-                        .HasForeignKey("BookingId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("Domain.Entities.User", "User")
-                        .WithMany("Violations")
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Booking");
 
                     b.Navigation("User");
                 });

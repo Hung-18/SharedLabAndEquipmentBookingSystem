@@ -118,38 +118,53 @@ namespace Application.Services
             ArgumentNullException.ThrowIfNull(request);
             ValidateTime(request.StartTime, request.EndTime, requireFuture: true);
 
-            var actor = await GetCurrentActiveUserAsync(cancellationToken);
-            EnsureManagerOrAdmin(actor);
-            await ValidateResourceAsync(request.LabId, request.EquipmentId, cancellationToken);
-            await EnsureCanManageResourceAsync(actor, request.LabId, request.EquipmentId, cancellationToken);
-
-            await ValidateConflictAsync(
-                request.LabId,
-                request.EquipmentId,
-                request.StartTime,
-                request.EndTime,
-                excludeMaintenanceId: null,
-                cancellationToken);
-
-            var maintenance = new Maintenance(
-                actor.UserId,
-                request.LabId,
-                request.EquipmentId,
-                request.StartTime,
-                request.EndTime,
-                request.MaintenanceCost,
-                request.Notes);
-
-            maintenance.ConfigureRecurrence(
-                request.RecurrenceType,
-                request.RecurrenceInterval,
-                request.RecurrenceEndDate);
+            int createdMaintenanceId = 0;
 
             await _unitOfWork.ExecuteInSerializableTransactionAsync(
                 async ct =>
                 {
+                    var actor = await GetCurrentActiveUserAsync(ct);
+                    EnsureManagerOrAdmin(actor);
+
+                    await ValidateResourceAsync(
+                        request.LabId,
+                        request.EquipmentId,
+                        ct);
+
+                    await EnsureCanManageResourceAsync(
+                        actor,
+                        request.LabId,
+                        request.EquipmentId,
+                        ct);
+
+                    // Conflict checks must run while the Serializable
+                    // transaction is holding the relevant range locks.
+                    await ValidateConflictAsync(
+                        request.LabId,
+                        request.EquipmentId,
+                        request.StartTime,
+                        request.EndTime,
+                        excludeMaintenanceId: null,
+                        ct);
+
+                    var maintenance = new Maintenance(
+                        actor.UserId,
+                        request.LabId,
+                        request.EquipmentId,
+                        request.StartTime,
+                        request.EndTime,
+                        request.MaintenanceCost,
+                        request.Notes);
+
+                    maintenance.ConfigureRecurrence(
+                        request.RecurrenceType,
+                        request.RecurrenceInterval,
+                        request.RecurrenceEndDate);
+
                     await _repository.AddAsync(maintenance, ct);
                     await _unitOfWork.SaveChangesAsync(ct);
+
+                    createdMaintenanceId = maintenance.MaintenanceId;
 
                     await AddMaintenanceNotificationAsync(
                         maintenance,
@@ -170,7 +185,7 @@ namespace Application.Services
                 cancellationToken);
 
             var created = await _repository.GetDetailAsync(
-                maintenance.MaintenanceId,
+                createdMaintenanceId,
                 cancellationToken)
                 ?? throw new InvalidOperationException(
                     "Không thể lấy thông tin lịch bảo trì vừa tạo.");
@@ -186,60 +201,76 @@ namespace Application.Services
             ArgumentNullException.ThrowIfNull(request);
             ValidateTime(request.StartTime, request.EndTime, requireFuture: true);
 
-            var actor = await GetCurrentActiveUserAsync(cancellationToken);
-            EnsureManagerOrAdmin(actor);
-            var maintenance = await GetMaintenanceOrThrowAsync(id, cancellationToken);
+            await _unitOfWork.ExecuteInSerializableTransactionAsync(
+                async ct =>
+                {
+                    var actor = await GetCurrentActiveUserAsync(ct);
+                    EnsureManagerOrAdmin(actor);
 
-            await EnsureCanManageResourceAsync(
-                actor,
-                maintenance.LabId,
-                maintenance.EquipmentId,
+                    // Re-read inside the transaction. Do not reuse an entity
+                    // loaded before the transaction because it may be stale.
+                    var maintenance = await GetMaintenanceOrThrowAsync(id, ct);
+
+                    await EnsureCanManageResourceAsync(
+                        actor,
+                        maintenance.LabId,
+                        maintenance.EquipmentId,
+                        ct);
+
+                    await ValidateResourceAsync(
+                        request.LabId,
+                        request.EquipmentId,
+                        ct);
+
+                    await EnsureCanManageResourceAsync(
+                        actor,
+                        request.LabId,
+                        request.EquipmentId,
+                        ct);
+
+                    await ValidateConflictAsync(
+                        request.LabId,
+                        request.EquipmentId,
+                        request.StartTime,
+                        request.EndTime,
+                        id,
+                        ct);
+
+                    var oldValue = Snapshot(maintenance);
+
+                    maintenance.UpdateDetails(
+                        request.LabId,
+                        request.EquipmentId,
+                        request.StartTime,
+                        request.EndTime,
+                        request.MaintenanceCost,
+                        request.Notes);
+
+                    maintenance.ConfigureRecurrence(
+                        request.RecurrenceType,
+                        request.RecurrenceInterval,
+                        request.RecurrenceEndDate,
+                        maintenance.ParentMaintenanceId);
+
+                    _repository.Update(maintenance);
+
+                    await AddMaintenanceNotificationAsync(
+                        maintenance,
+                        "được cập nhật",
+                        ct);
+
+                    await _auditLogWriter.WriteAsync(
+                        actorUserId: actor.UserId,
+                        actionType: AuditActionType.Update,
+                        entityName: nameof(Maintenance),
+                        entityId: maintenance.MaintenanceId,
+                        oldValue: oldValue,
+                        newValue: Snapshot(maintenance),
+                        cancellationToken: ct);
+
+                    await _unitOfWork.SaveChangesAsync(ct);
+                },
                 cancellationToken);
-
-            await ValidateResourceAsync(request.LabId, request.EquipmentId, cancellationToken);
-            await EnsureCanManageResourceAsync(
-                actor,
-                request.LabId,
-                request.EquipmentId,
-                cancellationToken);
-
-            await ValidateConflictAsync(
-                request.LabId,
-                request.EquipmentId,
-                request.StartTime,
-                request.EndTime,
-                id,
-                cancellationToken);
-
-            var oldValue = Snapshot(maintenance);
-
-            maintenance.UpdateDetails(
-                request.LabId,
-                request.EquipmentId,
-                request.StartTime,
-                request.EndTime,
-                request.MaintenanceCost,
-                request.Notes);
-
-            maintenance.ConfigureRecurrence(
-                request.RecurrenceType,
-                request.RecurrenceInterval,
-                request.RecurrenceEndDate,
-                maintenance.ParentMaintenanceId);
-
-            _repository.Update(maintenance);
-            await AddMaintenanceNotificationAsync(maintenance, "được cập nhật", cancellationToken);
-
-            await _auditLogWriter.WriteAsync(
-                actorUserId: actor.UserId,
-                actionType: AuditActionType.Update,
-                entityName: nameof(Maintenance),
-                entityId: maintenance.MaintenanceId,
-                oldValue: oldValue,
-                newValue: Snapshot(maintenance),
-                cancellationToken: cancellationToken);
-
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
         }
 
         public async Task StartAsync(

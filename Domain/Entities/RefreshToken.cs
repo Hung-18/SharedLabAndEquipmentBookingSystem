@@ -1,4 +1,5 @@
-﻿
+﻿using System.Security.Cryptography;
+using System.Text;
 
 namespace Domain.Entities
 {
@@ -8,20 +9,21 @@ namespace Domain.Entities
 
         public RefreshToken(
             int userId,
-            string token,
+            string rawToken,
             DateTime expiresAt)
         {
             if (userId <= 0)
                 throw new ArgumentException("UserId phải lớn hơn 0");
 
-            if (string.IsNullOrWhiteSpace(token))
+            if (string.IsNullOrWhiteSpace(rawToken))
                 throw new ArgumentException("Token không được để trống");
 
             if (expiresAt <= DateTime.UtcNow)
-                throw new ArgumentException("Thời gian hết hạn phải lớn hơn hiện tại");
+                throw new ArgumentException(
+                    "Thời gian hết hạn phải lớn hơn hiện tại");
 
             UserId = userId;
-            Token = token.Trim();
+            TokenHash = ComputeHash(rawToken);
             ExpiresAt = expiresAt;
             CreatedAt = DateTime.UtcNow;
             Status = RefreshTokenStatus.Active;
@@ -31,7 +33,11 @@ namespace Domain.Entities
 
         public int UserId { get; private set; }
 
-        public string Token { get; private set; } = string.Empty;
+        /// <summary>
+        /// SHA-256 hash of the refresh token. The raw token is returned to the
+        /// client once and is never persisted.
+        /// </summary>
+        public string TokenHash { get; private set; } = string.Empty;
 
         public DateTime ExpiresAt { get; private set; }
 
@@ -39,14 +45,29 @@ namespace Domain.Entities
 
         public DateTime CreatedAt { get; private set; }
 
-        public RefreshTokenStatus Status { get; private set; } = RefreshTokenStatus.Active;
+        public RefreshTokenStatus Status { get; private set; } =
+            RefreshTokenStatus.Active;
 
         public User? User { get; private set; }
 
         public bool IsActive =>
-            Status == RefreshTokenStatus.Active &&
-            RevokedAt == null &&
-            ExpiresAt > DateTime.UtcNow;
+            Status == RefreshTokenStatus.Active
+            && RevokedAt == null
+            && ExpiresAt > DateTime.UtcNow;
+
+        public static string ComputeHash(string rawToken)
+        {
+            if (string.IsNullOrWhiteSpace(rawToken))
+                throw new ArgumentException(
+                    "Token không được để trống.",
+                    nameof(rawToken));
+
+            byte[] tokenBytes =
+                Encoding.UTF8.GetBytes(rawToken.Trim());
+
+            return Convert.ToHexString(
+                SHA256.HashData(tokenBytes));
+        }
 
         public void Revoke()
         {
