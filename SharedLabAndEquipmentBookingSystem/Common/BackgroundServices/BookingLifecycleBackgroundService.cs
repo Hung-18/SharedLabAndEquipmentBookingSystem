@@ -43,35 +43,59 @@ namespace API.Common.BackgroundServices
         private async Task RejectExpiredPendingBookingsAsync(
             CancellationToken cancellationToken)
         {
-            using var scope = _scopeFactory.CreateScope();
-            var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
             DateTime now = DateTime.UtcNow;
+            List<int> expiredBookingIds;
 
-            var expiredBookings = await unitOfWork.Bookings.FindAsync(
-                x => x.Status == BookingStatus.Pending && x.StartTime <= now,
-                cancellationToken);
+            // Use a short-lived read scope so entities discovered before the
+            // transaction are never reused as stale tracked instances.
+            using (var readScope = _scopeFactory.CreateScope())
+            {
+                var readUnitOfWork =
+                    readScope.ServiceProvider.GetRequiredService<IUnitOfWork>();
 
-            if (expiredBookings.Count == 0)
+                expiredBookingIds = (
+                    await readUnitOfWork.Bookings.GetExpiredPendingIdsAsync(
+                        now,
+                        cancellationToken))
+                    .Distinct()
+                    .ToList();
+            }
+
+            if (expiredBookingIds.Count == 0)
                 return;
 
+            // A new scope gives the transaction a fresh DbContext. Every
+            // booking is re-read inside the Serializable transaction before
+            // changing its status.
+            using var processingScope = _scopeFactory.CreateScope();
+            var unitOfWork =
+                processingScope.ServiceProvider.GetRequiredService<IUnitOfWork>();
             var waitlistService =
-                scope.ServiceProvider.GetRequiredService<IWaitlistService>();
+                processingScope.ServiceProvider.GetRequiredService<IWaitlistService>();
 
             await unitOfWork.ExecuteInSerializableTransactionAsync(
                 async ct =>
                 {
                     var rejectedBookingIds = new List<int>();
 
-                    foreach (var booking in expiredBookings)
+                    foreach (int bookingId in expiredBookingIds)
                     {
-                        if (booking.Status != BookingStatus.Pending
-                            || booking.StartTime > DateTime.UtcNow)
+                        var booking = await unitOfWork.Bookings.GetByIdAsync(
+                            bookingId,
+                            ct);
+
+                        DateTime currentTime = DateTime.UtcNow;
+
+                        if (booking is null
+                            || booking.Status != BookingStatus.Pending
+                            || booking.StartTime > currentTime)
                         {
                             continue;
                         }
 
                         booking.ExpirePending(
                             "Yêu cầu booking đã quá giờ bắt đầu và tự động bị từ chối.");
+
                         unitOfWork.Bookings.Update(booking);
                         rejectedBookingIds.Add(booking.BookingId);
 
@@ -85,8 +109,11 @@ namespace API.Common.BackgroundServices
                             ct);
                     }
 
-                    // Lưu status Rejected trong transaction hiện tại để
-                    // WaitlistService đọc được trạng thái mới. Chưa commit.
+                    if (rejectedBookingIds.Count == 0)
+                        return;
+
+                    // Persist Rejected status inside the current transaction so
+                    // WaitlistService sees the released resource.
                     await unitOfWork.SaveChangesAsync(ct);
 
                     foreach (int bookingId in rejectedBookingIds)

@@ -1,5 +1,5 @@
-﻿using Application.DTOs.Auth;
-using Application.Interfaces;
+﻿using Application.Interfaces;
+using Application.Mappings;
 using Application.Services;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -12,7 +12,7 @@ namespace Application.DI
         {
             services.AddAutoMapper(
                 configuration => { },
-                typeof(DependencyInjection).Assembly);
+                typeof(MappingProfile).Assembly);
 
             services.AddScoped<IJwtService, JWTService>();
             services.AddScoped<IUserService, UserService>();

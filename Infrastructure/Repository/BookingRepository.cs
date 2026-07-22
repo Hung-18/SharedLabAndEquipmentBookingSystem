@@ -54,6 +54,19 @@ namespace Infrastructure.Repository
                 .ToListAsync(cancellationToken);
         }
 
+        public async Task<IReadOnlyList<int>> GetExpiredPendingIdsAsync(
+            DateTime now,
+            CancellationToken cancellationToken = default)
+        {
+            return await Context.Bookings
+                .AsNoTracking()
+                .Where(x =>
+                    x.Status == BookingStatus.Pending
+                    && x.StartTime <= now)
+                .Select(x => x.BookingId)
+                .ToListAsync(cancellationToken);
+        }
+
         public async Task<IReadOnlyList<Booking>> GetCompetingPendingBookingsAsync(
             int bookingId,
             DateTime startTime,

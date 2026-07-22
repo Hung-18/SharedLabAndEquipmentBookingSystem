@@ -3,6 +3,7 @@ using Application.Interfaces;
 using Domain;
 using Domain.Entities;
 using Domain.Interfaces;
+using AutoMapper;
 
 namespace Application.Services
 {
@@ -12,11 +13,15 @@ namespace Application.Services
         private readonly IUserRepository _userRepository;
         private readonly ICurrentUserService _currentUserService;
 
+        private readonly IMapper _mapper;
+
         public RoleService(
+            IMapper mapper,
             IRoleRepository repository,
             IUserRepository userRepository,
             ICurrentUserService currentUserService)
         {
+            _mapper = mapper;
             _repository = repository;
             _userRepository = userRepository;
             _currentUserService = currentUserService;
@@ -27,7 +32,7 @@ namespace Application.Services
         {
             await EnsureAdminAsync(cancellationToken);
             var roles = await _repository.GetAllOrderedAsync(cancellationToken);
-            return roles.Select(Map).ToList();
+            return _mapper.Map<List<RoleResponse>>(roles);
         }
 
         public async Task<RoleResponse?> GetByIdAsync(
@@ -36,7 +41,9 @@ namespace Application.Services
         {
             await EnsureAdminAsync(cancellationToken);
             var role = await _repository.GetByIdAsync(roleId, cancellationToken);
-            return role is null ? null : Map(role);
+            return role is null
+                ? null
+                : _mapper.Map<RoleResponse>(role);
         }
 
         private async Task EnsureAdminAsync(CancellationToken cancellationToken)
@@ -53,14 +60,5 @@ namespace Application.Services
                 throw new UnauthorizedAccessException("Chỉ Admin được xem danh sách role.");
         }
 
-        private static RoleResponse Map(Role role)
-        {
-            return new RoleResponse
-            {
-                RoleId = role.RoleId,
-                RoleName = role.RoleName.ToString(),
-                Description = role.Description
-            };
-        }
     }
 }

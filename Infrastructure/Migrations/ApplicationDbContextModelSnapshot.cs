@@ -4,7 +4,6 @@ using Infrastructure.AppDbContext;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
-using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -12,11 +11,9 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20260717073041_InitDb")]
-    partial class InitDb
+    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
     {
-        /// <inheritdoc />
-        protected override void BuildTargetModel(ModelBuilder modelBuilder)
+        protected override void BuildModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -182,7 +179,7 @@ namespace Infrastructure.Migrations
                         {
                             t.HasTrigger("TRG_BookingItems_PreventConflict");
 
-                            t.HasCheckConstraint("CK_BookingItems_OneResourceOnly", "\r\n(\r\n    ([ResourceType] IN ('LabRoom', 'Lab') AND [LabId] IS NOT NULL AND [EquipmentId] IS NULL)\r\n    OR\r\n    ([ResourceType] = 'Equipment' AND [LabId] IS NULL AND [EquipmentId] IS NOT NULL)\r\n)");
+                            t.HasCheckConstraint("CK_BookingItems_OneResourceOnly", "\n(\n    ([ResourceType] IN ('LabRoom', 'Lab') AND [LabId] IS NOT NULL AND [EquipmentId] IS NULL)\n    OR\n    ([ResourceType] = 'Equipment' AND [LabId] IS NULL AND [EquipmentId] IS NOT NULL)\n)");
 
                             t.HasCheckConstraint("CK_BookingItems_ResourceType", "[ResourceType] IN ('LabRoom', 'Equipment')");
                         });
@@ -433,7 +430,7 @@ namespace Infrastructure.Migrations
 
                             t.HasCheckConstraint("CK_Maintenances_MaintenanceCost", "[MaintenanceCost] >= 0");
 
-                            t.HasCheckConstraint("CK_Maintenances_OneResourceOnly", "\r\n(\r\n    ([LabId] IS NOT NULL AND [EquipmentId] IS NULL)\r\n    OR\r\n    ([LabId] IS NULL AND [EquipmentId] IS NOT NULL)\r\n)");
+                            t.HasCheckConstraint("CK_Maintenances_OneResourceOnly", "\n(\n    ([LabId] IS NOT NULL AND [EquipmentId] IS NULL)\n    OR\n    ([LabId] IS NULL AND [EquipmentId] IS NOT NULL)\n)");
 
                             t.HasCheckConstraint("CK_Maintenances_StartTime_EndTime", "[StartTime] < [EndTime]");
 
@@ -614,18 +611,20 @@ namespace Infrastructure.Migrations
                         .HasMaxLength(30)
                         .HasColumnType("nvarchar(30)");
 
-                    b.Property<string>("Token")
+                    b.Property<string>("TokenHash")
                         .IsRequired()
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)")
+                        .HasColumnName("Token");
 
                     b.Property<int>("UserId")
                         .HasColumnType("int");
 
                     b.HasKey("RefreshTokenId");
 
-                    b.HasIndex("Token")
-                        .IsUnique();
+                    b.HasIndex("TokenHash")
+                        .IsUnique()
+                        .HasDatabaseName("IX_RefreshTokens_Token");
 
                     b.HasIndex("UserId");
 
@@ -814,61 +813,7 @@ namespace Infrastructure.Migrations
                         });
                 });
 
-            modelBuilder.Entity("Domain.Entities.Waitlist", b =>
-                {
-                    b.Property<int>("WaitlistId")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("WaitlistId"));
-
-                    b.Property<int?>("EquipmentId")
-                        .HasColumnType("int");
-
-                    b.Property<int?>("LabId")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime?>("NotifiedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<int>("QueuePosition")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime>("RequestedEnd")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime>("RequestedStart")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(30)
-                        .HasColumnType("nvarchar(30)");
-
-                    b.Property<int>("UserId")
-                        .HasColumnType("int");
-
-                    b.HasKey("WaitlistId");
-
-                    b.HasIndex("UserId");
-
-                    b.HasIndex("EquipmentId", "RequestedStart", "RequestedEnd");
-
-                    b.HasIndex("LabId", "RequestedStart", "RequestedEnd");
-
-                    b.ToTable("Waitlists", null, t =>
-                        {
-                            t.HasCheckConstraint("CK_Waitlists_OneResourceOnly", "\r\n(\r\n    ([LabId] IS NOT NULL AND [EquipmentId] IS NULL)\r\n    OR\r\n    ([LabId] IS NULL AND [EquipmentId] IS NOT NULL)\r\n)");
-
-                            t.HasCheckConstraint("CK_Waitlists_QueuePosition", "[QueuePosition] > 0");
-
-                            t.HasCheckConstraint("CK_Waitlists_RequestedStart_RequestedEnd", "[RequestedStart] < [RequestedEnd]");
-
-                            t.HasCheckConstraint("CK_Waitlists_Status", "[Status] IN ('Waiting', 'Notified', 'Booked', 'Cancelled', 'Expired')");
-                        });
-                });
-
-            modelBuilder.Entity("Violation", b =>
+            modelBuilder.Entity("Domain.Entities.Violation", b =>
                 {
                     b.Property<int>("ViolationId")
                         .ValueGeneratedOnAdd()
@@ -914,6 +859,60 @@ namespace Infrastructure.Migrations
                             t.HasCheckConstraint("CK_Violations_Status", "[Status] IN ('Active', 'Resolved', 'Cancelled')");
 
                             t.HasCheckConstraint("CK_Violations_ViolationType", "[ViolationType] IN ('NoShow', 'LateCheckout', 'DamageEquipment', 'MisuseEquipment', 'UnauthorizedUse')");
+                        });
+                });
+
+            modelBuilder.Entity("Domain.Entities.Waitlist", b =>
+                {
+                    b.Property<int>("WaitlistId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("WaitlistId"));
+
+                    b.Property<int?>("EquipmentId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("LabId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("NotifiedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("QueuePosition")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("RequestedEnd")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("RequestedStart")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("int");
+
+                    b.HasKey("WaitlistId");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("EquipmentId", "RequestedStart", "RequestedEnd");
+
+                    b.HasIndex("LabId", "RequestedStart", "RequestedEnd");
+
+                    b.ToTable("Waitlists", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_Waitlists_OneResourceOnly", "\n(\n    ([LabId] IS NOT NULL AND [EquipmentId] IS NULL)\n    OR\n    ([LabId] IS NULL AND [EquipmentId] IS NOT NULL)\n)");
+
+                            t.HasCheckConstraint("CK_Waitlists_QueuePosition", "[QueuePosition] > 0");
+
+                            t.HasCheckConstraint("CK_Waitlists_RequestedStart_RequestedEnd", "[RequestedStart] < [RequestedEnd]");
+
+                            t.HasCheckConstraint("CK_Waitlists_Status", "[Status] IN ('Waiting', 'Notified', 'Booked', 'Cancelled', 'Expired')");
                         });
                 });
 
@@ -1102,6 +1101,25 @@ namespace Infrastructure.Migrations
                     b.Navigation("Role");
                 });
 
+            modelBuilder.Entity("Domain.Entities.Violation", b =>
+                {
+                    b.HasOne("Domain.Entities.Booking", "Booking")
+                        .WithMany("Violations")
+                        .HasForeignKey("BookingId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Domain.Entities.User", "User")
+                        .WithMany("Violations")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Booking");
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("Domain.Entities.Waitlist", b =>
                 {
                     b.HasOne("Domain.Entities.Equipment", "Equipment")
@@ -1123,25 +1141,6 @@ namespace Infrastructure.Migrations
                     b.Navigation("Equipment");
 
                     b.Navigation("LabRoom");
-
-                    b.Navigation("User");
-                });
-
-            modelBuilder.Entity("Violation", b =>
-                {
-                    b.HasOne("Domain.Entities.Booking", "Booking")
-                        .WithMany("Violations")
-                        .HasForeignKey("BookingId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("Domain.Entities.User", "User")
-                        .WithMany("Violations")
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Booking");
 
                     b.Navigation("User");
                 });

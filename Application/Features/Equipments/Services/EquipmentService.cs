@@ -3,6 +3,7 @@ using Application.Interfaces;
 using Domain;
 using Domain.Entities;
 using Domain.Interfaces;
+using AutoMapper;
 
 namespace Application.Services
 {
@@ -14,12 +15,16 @@ namespace Application.Services
         private readonly IAuditLogWriter _auditLogWriter;
         private readonly ICurrentUserService _currentUserService;
 
+        private readonly IMapper _mapper;
+
         public EquipmentService(
+            IMapper mapper,
             IEquipmentRepository repository,
             IUnitOfWork unitOfWork,
             IAuditLogWriter auditLogWriter,
             ICurrentUserService currentUserService)
         {
+            _mapper = mapper;
             _repository = repository;
             _unitOfWork = unitOfWork;
             _auditLogWriter = auditLogWriter;
@@ -46,7 +51,7 @@ namespace Application.Services
                 cancellationToken);
             return new PagedEquipmentResponse
             {
-                Items = items.Select(MapResponse).ToList(),
+                Items = _mapper.Map<List<EquipmentResponse>>(items),
                 PageNumber = request.PageNumber,
                 PageSize = request.PageSize,
                 TotalCount = total,
@@ -58,7 +63,7 @@ namespace Application.Services
         {
             await GetAuthenticatedUserAsync(cancellationToken);
             return (await _repository.GetAllAsync(cancellationToken))
-                .Select(MapResponse)
+                .Select(equipment => _mapper.Map<EquipmentResponse>(equipment))
                 .ToList();
         }
 
@@ -68,7 +73,9 @@ namespace Application.Services
         {
             await GetAuthenticatedUserAsync(cancellationToken);
             var equipment = await _repository.GetDetailAsync(id, cancellationToken);
-            return equipment is null ? null : MapDetailResponse(equipment);
+            return equipment is null
+                ? null
+                : _mapper.Map<EquipmentDetailResponse>(equipment);
         }
 
         public async Task<List<EquipmentResponse>> GetByLabIdAsync(
@@ -79,7 +86,7 @@ namespace Application.Services
             _ = await _unitOfWork.LabRooms.GetByIdAsync(labId, cancellationToken)
                 ?? throw new KeyNotFoundException($"Không tìm thấy phòng lab có ID {labId}.");
             return (await _repository.GetByLabIdAsync(labId, cancellationToken))
-                .Select(MapResponse)
+                .Select(equipment => _mapper.Map<EquipmentResponse>(equipment))
                 .ToList();
         }
 
@@ -112,9 +119,14 @@ namespace Application.Services
                 await _unitOfWork.SaveChangesAsync(ct);
             }, cancellationToken);
 
-            return MapDetailResponse(
-                await _repository.GetDetailAsync(equipment.EquipmentId, cancellationToken)
-                ?? throw new InvalidOperationException("Không thể đọc lại thiết bị vừa tạo."));
+            var createdEquipment =
+                await _repository.GetDetailAsync(
+                    equipment.EquipmentId,
+                    cancellationToken)
+                ?? throw new InvalidOperationException(
+                    "Không thể đọc lại thiết bị vừa tạo.");
+
+            return _mapper.Map<EquipmentDetailResponse>(createdEquipment);
         }
 
         public async Task UpdateAsync(
@@ -224,23 +236,5 @@ namespace Application.Services
             Status = equipment.Status.ToString()
         };
 
-        private static EquipmentResponse MapResponse(Equipment equipment) => new()
-        {
-            EquipmentId = equipment.EquipmentId,
-            LabId = equipment.LabId,
-            EquipmentName = equipment.EquipmentName,
-            Status = equipment.Status.ToString()
-        };
-
-        private static EquipmentDetailResponse MapDetailResponse(Equipment equipment) => new()
-        {
-            EquipmentId = equipment.EquipmentId,
-            LabId = equipment.LabId,
-            EquipmentName = equipment.EquipmentName,
-            ModelSpecs = equipment.ModelSpecs,
-            ImageUrl = equipment.ImageUrl,
-            UsageGuideline = equipment.UsageGuideline,
-            Status = equipment.Status.ToString()
-        };
     }
 }

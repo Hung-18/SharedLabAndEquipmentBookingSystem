@@ -3,6 +3,7 @@ using Application.Interfaces;
 using Domain;
 using Domain.Entities;
 using Domain.Interfaces;
+using AutoMapper;
 
 namespace Application.Services
 {
@@ -16,12 +17,16 @@ namespace Application.Services
         private readonly IAuditLogWriter _auditLogWriter;
         private readonly ICurrentUserService _currentUserService;
 
+        private readonly IMapper _mapper;
+
         public ViolationService(
+            IMapper mapper,
             IViolationRepository repository,
             IUnitOfWork unitOfWork,
             IAuditLogWriter auditLogWriter,
             ICurrentUserService currentUserService)
         {
+            _mapper = mapper;
             _repository = repository;
             _unitOfWork = unitOfWork;
             _auditLogWriter = auditLogWriter;
@@ -45,7 +50,7 @@ namespace Application.Services
 
             return violations
                 .OrderByDescending(x => x.LoggedAt)
-                .Select(MapResponse)
+                .Select(violation => _mapper.Map<ViolationResponse>(violation))
                 .ToList();
         }
 
@@ -64,7 +69,7 @@ namespace Application.Services
                 cancellationToken);
             await EnsureCanReadBookingAsync(actor, booking, cancellationToken);
 
-            return MapResponse(violation);
+            return _mapper.Map<ViolationResponse>(violation);
         }
 
         public async Task<List<ViolationResponse>> GetByUserIdAsync(
@@ -96,7 +101,7 @@ namespace Application.Services
                     "Bạn không có quyền xem vi phạm của người dùng này.");
             }
 
-            return violations.Select(MapResponse).ToList();
+            return _mapper.Map<List<ViolationResponse>>(violations);
         }
 
         public async Task<List<ViolationResponse>> GetActiveByUserIdAsync(
@@ -128,7 +133,7 @@ namespace Application.Services
                     "Bạn không có quyền xem vi phạm của người dùng này.");
             }
 
-            return violations.Select(MapResponse).ToList();
+            return _mapper.Map<List<ViolationResponse>>(violations);
         }
 
         public async Task<List<ViolationResponse>> GetByBookingIdAsync(
@@ -146,7 +151,7 @@ namespace Application.Services
                 bookingId,
                 cancellationToken);
 
-            return violations.Select(MapResponse).ToList();
+            return _mapper.Map<List<ViolationResponse>>(violations);
         }
 
         public async Task<UserViolationSummaryResponse> GetUserSummaryAsync(
@@ -189,7 +194,8 @@ namespace Application.Services
                 ActivePenaltyPoints = activeViolations.Sum(
                     x => x.PenaltyPointsAdded),
                 ActiveViolations = activeViolations
-                    .Select(MapResponse)
+                    .Select(violation =>
+                        _mapper.Map<ViolationResponse>(violation))
                     .ToList()
             };
         }
@@ -228,7 +234,7 @@ namespace Application.Services
                 },
                 cancellationToken);
 
-            return MapResponse(createdViolation!);
+            return _mapper.Map<ViolationResponse>(createdViolation!);
         }
 
         public async Task<ViolationResponse?> EnsureAutomaticViolationAsync(
@@ -276,7 +282,9 @@ namespace Application.Services
                 },
                 cancellationToken);
 
-            return result is null ? null : MapResponse(result);
+            return result is null
+                ? null
+                : _mapper.Map<ViolationResponse>(result);
         }
 
         public async Task ResolveAsync(
@@ -710,18 +718,5 @@ namespace Application.Services
             }
         }
 
-        private static ViolationResponse MapResponse(Violation violation)
-        {
-            return new ViolationResponse
-            {
-                ViolationId = violation.ViolationId,
-                UserId = violation.UserId,
-                BookingId = violation.BookingId,
-                ViolationType = violation.ViolationType.ToString(),
-                PenaltyPointsAdded = violation.PenaltyPointsAdded,
-                LoggedAt = violation.LoggedAt,
-                Status = violation.Status.ToString()
-            };
-        }
     }
 }

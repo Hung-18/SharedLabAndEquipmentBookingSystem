@@ -18,6 +18,10 @@ namespace Domain.Interfaces
         Task<IReadOnlyList<Booking>> GetPendingBookingsAsync(
             CancellationToken cancellationToken = default);
 
+        Task<IReadOnlyList<int>> GetExpiredPendingIdsAsync(
+            DateTime now,
+            CancellationToken cancellationToken = default);
+
         Task<IReadOnlyList<Booking>> GetCompetingPendingBookingsAsync(
             int bookingId,
             DateTime startTime,

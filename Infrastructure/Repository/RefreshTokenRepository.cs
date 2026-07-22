@@ -15,11 +15,20 @@ namespace Infrastructure.Repository
         {
         }
 
-        public async Task<RefreshToken?> GetByTokenAsync(string token,CancellationToken cancellationToken = default)
+        public async Task<RefreshToken?> GetByTokenAsync(
+            string token,
+            CancellationToken cancellationToken = default)
         {
+            if (string.IsNullOrWhiteSpace(token))
+                return null;
+
+            string tokenHash = RefreshToken.ComputeHash(token);
+
             return await Context.RefreshTokens
                 .Include(x => x.User)
-                .FirstOrDefaultAsync(x => x.Token == token, cancellationToken);
+                .FirstOrDefaultAsync(
+                    x => x.TokenHash == tokenHash,
+                    cancellationToken);
         }
 
         public async Task AddRefreshTokenAsync(RefreshToken refreshToken)

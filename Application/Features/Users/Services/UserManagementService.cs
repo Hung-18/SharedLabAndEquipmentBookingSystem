@@ -7,6 +7,7 @@ using System;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using AutoMapper;
 
 namespace Application.Services
 {
@@ -19,12 +20,16 @@ namespace Application.Services
         private readonly ICurrentUserService _currentUserService;
         private readonly IAuditLogWriter _auditLogWriter;
 
+        private readonly IMapper _mapper;
+
         public UserManagementService(
+            IMapper mapper,
             IUserRepository repository,
             IUnitOfWork unitOfWork,
             ICurrentUserService currentUserService,
             IAuditLogWriter auditLogWriter)
         {
+            _mapper = mapper;
             _repository = repository;
             _unitOfWork = unitOfWork;
             _currentUserService = currentUserService;
@@ -90,7 +95,7 @@ namespace Application.Services
             return new PagedUserResponse
             {
                 Items = items
-                    .Select(user => Map(user))
+                    .Select(user => MapUser(user))
                     .ToList(),
 
                 PageNumber = pageNumber,
@@ -113,7 +118,7 @@ namespace Application.Services
 
             return user is null
                 ? null
-                : Map(user);
+                : MapUser(user);
         }
 
         public async Task<UserManagementResponse> UpdateAsync(
@@ -220,7 +225,7 @@ namespace Application.Services
                 oldValue,
                 cancellationToken);
 
-            return Map(
+            return MapUser(
                 user,
                 roleNameOverride: role.RoleName);
         }
@@ -265,7 +270,7 @@ namespace Application.Services
                 oldValue,
                 cancellationToken);
 
-            return Map(
+            return MapUser(
                 user,
                 departmentNameOverride:
                     department.DepartmentName);
@@ -492,7 +497,7 @@ namespace Application.Services
                 userId,
                 cancellationToken);
 
-            return Map(reloaded);
+            return MapUser(reloaded);
         }
 
         private static void ValidateProfileRequest(
@@ -549,35 +554,27 @@ namespace Application.Services
             };
         }
 
-        private static UserManagementResponse Map(
+        private UserManagementResponse MapUser(
             User user,
             RoleName? roleNameOverride = null,
             string? departmentNameOverride = null)
         {
-            return new UserManagementResponse
+            var response =
+                _mapper.Map<UserManagementResponse>(user);
+
+            if (roleNameOverride.HasValue)
             {
-                UserId = user.UserId,
-                FullName = user.FullName,
-                Username = user.Username,
-                Email = user.Email,
-                RoleId = user.RoleId,
+                response.RoleName =
+                    roleNameOverride.Value.ToString();
+            }
 
-                RoleName =
-                    roleNameOverride?.ToString()
-                    ?? user.Role?.RoleName.ToString()
-                    ?? string.Empty,
+            if (departmentNameOverride is not null)
+            {
+                response.DepartmentName =
+                    departmentNameOverride;
+            }
 
-                DepartmentId = user.DepartmentId,
-
-                DepartmentName =
-                    departmentNameOverride
-                    ?? user.Department?.DepartmentName
-                    ?? string.Empty,
-
-                PenaltyPoints = user.PenaltyPoints,
-                RestrictionUntil = user.RestrictionUntil,
-                Status = user.Status
-            };
+            return response;
         }
     }
 }

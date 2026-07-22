@@ -3,6 +3,7 @@ using Application.Interfaces;
 using Domain;
 using Domain.Entities;
 using Domain.Interfaces;
+using AutoMapper;
 
 namespace Application.Services
 {
@@ -16,12 +17,16 @@ namespace Application.Services
         private readonly IAuditLogWriter _auditLogWriter;
         private readonly ICurrentUserService _currentUserService;
 
+        private readonly IMapper _mapper;
+
         public NotificationService(
+            IMapper mapper,
             INotificationRepository repository,
             IUnitOfWork unitOfWork,
             IAuditLogWriter auditLogWriter,
             ICurrentUserService currentUserService)
         {
+            _mapper = mapper;
             _repository = repository;
             _unitOfWork = unitOfWork;
             _auditLogWriter = auditLogWriter;
@@ -44,7 +49,7 @@ namespace Application.Services
                 pageNumber,
                 pageSize,
                 cancellationToken);
-            return notifications.Select(MapResponse).ToList();
+            return _mapper.Map<List<NotificationResponse>>(notifications);
         }
 
         public async Task<List<NotificationResponse>> GetUnreadByUserIdAsync(
@@ -56,7 +61,7 @@ namespace Application.Services
             var notifications = await _repository.GetUnreadByUserIdAsync(
                 userId,
                 cancellationToken);
-            return notifications.Select(MapResponse).ToList();
+            return _mapper.Map<List<NotificationResponse>>(notifications);
         }
 
         public async Task<UnreadNotificationCountResponse> CountUnreadAsync(
@@ -125,7 +130,7 @@ namespace Application.Services
                 await _unitOfWork.SaveChangesAsync(ct);
             }, cancellationToken);
 
-            return MapResponse(notification);
+            return _mapper.Map<NotificationResponse>(notification);
         }
 
         public async Task MarkAsReadAsync(
@@ -200,18 +205,5 @@ namespace Application.Services
                 "Bạn chỉ được xem hoặc cập nhật thông báo của chính mình.");
         }
 
-        private static NotificationResponse MapResponse(Notification notification)
-        {
-            return new NotificationResponse
-            {
-                NotificationId = notification.NotificationId,
-                UserId = notification.UserId,
-                Title = notification.Title,
-                Message = notification.Message,
-                NotificationType = notification.NotificationType.ToString(),
-                IsRead = notification.IsRead,
-                CreatedAt = notification.CreatedAt
-            };
-        }
     }
 }

@@ -619,12 +619,15 @@ namespace Application.Services
                     .Select(x => x.First())
                     .ToList();
 
-                // Chỉ maintenance của cả phòng làm giảm giờ khả dụng
-                // của phòng. Maintenance một thiết bị vẫn được hiển thị trên
-                // calendar nhưng không đồng nghĩa toàn bộ phòng ngừng hoạt động.
+                // Keep report availability consistent with the booking
+                // conflict model: maintenance of the room or any equipment
+                // inside that room blocks a whole-room booking.
                 var blockingMaintenances = maintenances
                     .Where(IsBlockingMaintenance)
-                    .Where(x => x.LabId == lab.LabId)
+                    .Where(x =>
+                        x.LabId == lab.LabId
+                        || (x.Equipment != null
+                            && x.Equipment.LabId == lab.LabId))
                     .ToList();
 
                 double reservedHours = MergeAndMeasure(
