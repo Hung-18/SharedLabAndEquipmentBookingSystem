@@ -27,6 +27,14 @@ builder.Services.AddApiServices(
     builder.Configuration,
     builder.Environment);
 
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowAngular",
+        policy => policy.WithOrigins("http://localhost:64847") // Cổng FE của bạn
+                        .AllowAnyMethod() // Cho phép GET, POST, PUT, DELETE
+                        .AllowAnyHeader()); // Cho phép gửi Token
+});
+
 var app = builder.Build();
 
 app.UseMiddleware<GlobalExceptionMiddleware>();
@@ -55,7 +63,7 @@ if (builder.Configuration.GetValue<bool>(
 }
 
 app.UseHttpsRedirection();
-app.UseCors(API.DependencyInjection.CorsPolicyName);
+app.UseCors("AllowAngular");
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();

@@ -179,7 +179,7 @@ namespace Infrastructure.Migrations
                         {
                             t.HasTrigger("TRG_BookingItems_PreventConflict");
 
-                            t.HasCheckConstraint("CK_BookingItems_OneResourceOnly", "\n(\n    ([ResourceType] IN ('LabRoom', 'Lab') AND [LabId] IS NOT NULL AND [EquipmentId] IS NULL)\n    OR\n    ([ResourceType] = 'Equipment' AND [LabId] IS NULL AND [EquipmentId] IS NOT NULL)\n)");
+                            t.HasCheckConstraint("CK_BookingItems_OneResourceOnly", "\r\n(\r\n    ([ResourceType] IN ('LabRoom', 'Lab') AND [LabId] IS NOT NULL AND [EquipmentId] IS NULL)\r\n    OR\r\n    ([ResourceType] = 'Equipment' AND [LabId] IS NULL AND [EquipmentId] IS NOT NULL)\r\n)");
 
                             t.HasCheckConstraint("CK_BookingItems_ResourceType", "[ResourceType] IN ('LabRoom', 'Equipment')");
                         });
@@ -430,7 +430,7 @@ namespace Infrastructure.Migrations
 
                             t.HasCheckConstraint("CK_Maintenances_MaintenanceCost", "[MaintenanceCost] >= 0");
 
-                            t.HasCheckConstraint("CK_Maintenances_OneResourceOnly", "\n(\n    ([LabId] IS NOT NULL AND [EquipmentId] IS NULL)\n    OR\n    ([LabId] IS NULL AND [EquipmentId] IS NOT NULL)\n)");
+                            t.HasCheckConstraint("CK_Maintenances_OneResourceOnly", "\r\n(\r\n    ([LabId] IS NOT NULL AND [EquipmentId] IS NULL)\r\n    OR\r\n    ([LabId] IS NULL AND [EquipmentId] IS NOT NULL)\r\n)");
 
                             t.HasCheckConstraint("CK_Maintenances_StartTime_EndTime", "[StartTime] < [EndTime]");
 
@@ -906,7 +906,7 @@ namespace Infrastructure.Migrations
 
                     b.ToTable("Waitlists", null, t =>
                         {
-                            t.HasCheckConstraint("CK_Waitlists_OneResourceOnly", "\n(\n    ([LabId] IS NOT NULL AND [EquipmentId] IS NULL)\n    OR\n    ([LabId] IS NULL AND [EquipmentId] IS NOT NULL)\n)");
+                            t.HasCheckConstraint("CK_Waitlists_OneResourceOnly", "\r\n(\r\n    ([LabId] IS NOT NULL AND [EquipmentId] IS NULL)\r\n    OR\r\n    ([LabId] IS NULL AND [EquipmentId] IS NOT NULL)\r\n)");
 
                             t.HasCheckConstraint("CK_Waitlists_QueuePosition", "[QueuePosition] > 0");
 
