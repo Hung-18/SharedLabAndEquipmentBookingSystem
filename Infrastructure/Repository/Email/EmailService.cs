@@ -13,10 +13,14 @@ namespace Infrastructure.Repository.Email
 
         public async Task SendEmailAsync(string toEmail, string subject, string body)
         {
+            Console.WriteLine(">>> Đã vào hàm SendEmailAsync!");
             if (string.IsNullOrWhiteSpace(toEmail))
                 throw new ArgumentException("Email người nhận không được để trống.");
 
             string fromEmail = Required("EmailSettings:FromEmail");
+
+            Console.WriteLine($">>> Email gửi từ: {fromEmail}");
+
             string host = Required("EmailSettings:Host");
             string username = Required("EmailSettings:Username");
             string password = Required("EmailSettings:Password");
@@ -31,8 +35,18 @@ namespace Infrastructure.Repository.Email
 
             using var smtp = new SmtpClient();
             await smtp.ConnectAsync(host, port, SecureSocketOptions.StartTls);
-            await smtp.AuthenticateAsync(username, password);
+            try
+            {
+                await smtp.AuthenticateAsync(username, password);
+            }
+            catch(AuthenticationException ex)
+            {
+                Console.WriteLine("Auth failed: " + ex.Message);
+                Console.WriteLine(ex.ToString()); // includes inner exception / server response
+                throw;
+            }
             await smtp.SendAsync(email);
+            Console.WriteLine(">>> Gửi mail thành công!");
             await smtp.DisconnectAsync(true);
         }
 

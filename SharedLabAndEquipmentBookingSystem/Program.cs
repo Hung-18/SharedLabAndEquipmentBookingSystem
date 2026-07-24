@@ -7,6 +7,11 @@ using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
+if (builder.Environment.IsDevelopment())
+{
+    builder.Configuration.AddUserSecrets<Program>();
+}
+
 string connectionString =
     builder.Configuration.GetConnectionString("DefaultConnection")
     ?? throw new InvalidOperationException(
@@ -30,7 +35,7 @@ builder.Services.AddApiServices(
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAngular",
-        policy => policy.WithOrigins("http://localhost:64847") // Cổng FE của bạn
+        policy => policy.AllowAnyOrigin()//WithOrigins("http://localhost:4200") // Cổng FE của bạn
                         .AllowAnyMethod() // Cho phép GET, POST, PUT, DELETE
                         .AllowAnyHeader()); // Cho phép gửi Token
 });

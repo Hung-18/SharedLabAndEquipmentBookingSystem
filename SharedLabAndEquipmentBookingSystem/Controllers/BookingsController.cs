@@ -89,6 +89,7 @@ namespace API.Controllers
         }
 
         [HttpPost]
+        [Authorize(Roles ="Requester")]
         [ProducesResponseType(typeof(BookingDetailResponse), StatusCodes.Status201Created)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -117,7 +118,7 @@ namespace API.Controllers
         }
 
         [HttpPost("{id:int}/approve")]
-        [Authorize(Roles = "Admin,LabManager")]
+        [Authorize(Roles = "LabManager")]
         [ProducesResponseType(StatusCodes.Status204NoContent)]
         public async Task<IActionResult> Approve(
             int id,
@@ -128,7 +129,7 @@ namespace API.Controllers
         }
 
         [HttpPost("{id:int}/reject")]
-        [Authorize(Roles = "Admin,LabManager")]
+        [Authorize(Roles = "LabManager")]
         [ProducesResponseType(StatusCodes.Status204NoContent)]
         public async Task<IActionResult> Reject(
             int id,

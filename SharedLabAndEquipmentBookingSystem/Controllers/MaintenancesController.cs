@@ -74,7 +74,7 @@ namespace API.Controllers
             return Ok(result);
         }
 
-        [Authorize(Roles = "Admin,LabManager")]
+        [Authorize(Roles = "LabManager")]
         [HttpPost]
         [ProducesResponseType(
             typeof(MaintenanceDetailResponse),
@@ -95,7 +95,7 @@ namespace API.Controllers
                 result);
         }
 
-        [Authorize(Roles = "Admin,LabManager")]
+        [Authorize(Roles = "LabManager")]
         [HttpPut("{id:int}")]
         [ProducesResponseType(StatusCodes.Status204NoContent)]
         [ProducesResponseType(StatusCodes.Status403Forbidden)]
@@ -111,7 +111,7 @@ namespace API.Controllers
             return NoContent();
         }
 
-        [Authorize(Roles = "Admin,LabManager")]
+        [Authorize(Roles = "LabManager")]
         [HttpPost("{id:int}/start")]
         public async Task<IActionResult> Start(
             int id,
@@ -122,7 +122,7 @@ namespace API.Controllers
             return NoContent();
         }
 
-        [Authorize(Roles = "Admin,LabManager")]
+        [Authorize(Roles = "LabManager")]
         [HttpPost("{id:int}/complete")]
         public async Task<IActionResult> Complete(
             int id,
@@ -133,7 +133,7 @@ namespace API.Controllers
             return NoContent();
         }
 
-        [Authorize(Roles = "Admin,LabManager")]
+        [Authorize(Roles = "LabManager")]
         [HttpPost("{id:int}/cancel")]
         public async Task<IActionResult> Cancel(
             int id,
@@ -145,7 +145,7 @@ namespace API.Controllers
         }
 
 
-        [Authorize(Roles = "Admin,LabManager")]
+        [Authorize(Roles = "LabManager")]
         [HttpPost("{id:int}/cancel-series")]
         public async Task<IActionResult> CancelSeries(
             int id,
